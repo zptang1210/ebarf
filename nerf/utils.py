@@ -393,7 +393,9 @@ class Trainer(object):
         conffile = os.path.basename(opt.config)
         p, upfolder = os.path.split(os.path.dirname(opt.config))
         upupfolder = os.path.split(p)[1]
-        expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
+        # * changed the workspace folder
+        # expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
+        expname = '_'.join([opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4]])
         self.workspace = os.path.join(opt.outdir, expname)
         print(f"Logging results to {self.workspace}")
 
@@ -440,8 +442,9 @@ class Trainer(object):
         if debug == False and not opt.render_mode:
             codePath = os.path.join(self.workspace, "code_" + self.slurm_id + "_" + self.process_id + "/")
             print(f"Copying this code from {code_dir} to {codePath}")
-            # BUG
+            # * fixed the bug of copying a folder into the same folder.
             # shutil.copytree(code_dir, codePath, symlinks=True, dirs_exist_ok=True)
+            shutil.copytree(code_dir, codePath, symlinks=True, dirs_exist_ok=True, ignore=shutil.ignore_patterns('output', 'data', '*.out'))
 
         self.log(f'[INFO] Trainer: {self.name} | {self.time_stamp} | {self.device} | {"fp16" if self.fp16 else "fp32"} | {self.workspace}')
         self.log(f'[INFO] #parameters: {sum([p.numel() for p in model.parameters() if p.requires_grad])}')

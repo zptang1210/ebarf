@@ -1,6 +1,6 @@
-outdir = output/mocapDesk2_output/
-datadir = TUMVIEDATA/mocap-desk2/
-expweek = feb-6/tumvie/
+outdir = output/mocapDesk2_output/tumvie/
+datadir = data/TUMVIEDATA/mocap-desk2/
+expweek = feb-6
 mode = tumvie
 lr = 0.005
 pp_poses_sphere = 0

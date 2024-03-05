@@ -467,7 +467,9 @@ class NGPDataset(Dataset):
         conffile = os.path.basename(opt.config)
         p, upfolder = os.path.split(os.path.dirname(opt.config))
         upupfolder = os.path.split(p)[1]
-        expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
+        # * changed the workspace folder
+        # expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
+        expname = '_'.join([opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4]])
         self.workspace = os.path.join(opt.outdir, expname)
         print(f"Dataloader uses {self.workspace} as workspace, too.")
 
