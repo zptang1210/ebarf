@@ -8,6 +8,16 @@ import shutil
 import h5py
 import hdf5plugin
 import glob
+
+import sys
+# Get the current script's directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory by going one level up
+parent_dir = os.path.dirname(current_dir)
+# Add the parent directory to sys.path
+sys.path.append(parent_dir)
+
+
 from utils.event_utils import *
 from utils.plot_utils import render_ev_accumulation
 
@@ -33,9 +43,9 @@ def main():
     if not os.path.exists(imgdirout):
         os.makedirs(imgdirout)
 
-    img_list = [os.path.join(args.indir, imgdir, im) for im in sorted(os.listdir(imgdir)) if im.endswith(".jpg")]
+    img_list = [os.path.join(imgdir, im) for im in sorted(os.listdir(imgdir)) if im.endswith(".jpg")]
     if len(img_list) == 0:
-        img_list = [os.path.join(args.indir, imgdir, im) for im in sorted(os.listdir(imgdir)) if im.endswith(".png")]
+        img_list = [os.path.join(imgdir, im) for im in sorted(os.listdir(imgdir)) if im.endswith(".png")]
     H, W, _ = cv2.imread(img_list[0]).shape
 
     # transforming intrinsics
@@ -80,7 +90,7 @@ def main():
                     continue
                 else:
                     h5file = h5file[0]
-                ef_in = h5py.File(os.path.join(args.indir, h5file), "r")
+                ef_in = h5py.File(h5file, "r")
                 outvizfolder = os.path.join(args.indir, "all_evs_left_undist_viz") if i == 2 else os.path.join(args.indir, "all_evs_right_undist_viz")
                 os.makedirs(outvizfolder, exist_ok=True)
 

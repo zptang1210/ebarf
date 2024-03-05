@@ -16,6 +16,8 @@ from utils.pose_utils import *
 from utils.plot_utils import *
 from utils.event_utils import *
 
+import hdf5plugin
+
 # NeRF dataset
 import json
 import matplotlib
@@ -157,11 +159,11 @@ def load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder=
     
     # load events
     h5file = glob.glob(os.path.join(path, f'*events_{suffix}.h5'))[0]
-    evs_h5 = h5py.File(os.path.join(path, h5file), "r")
+    evs_h5 = h5py.File(h5file, "r")
 
     # load undistortion
     h5file = glob.glob(os.path.join(path, f'*rectify_map_{suffix}.h5'))[0]
-    rmap = h5py.File(os.path.join(path, h5file), "r")
+    rmap = h5py.File(h5file, "r")
     rectify_map = np.array(rmap["rectify_map"])
     rmap.close()
 
@@ -169,7 +171,7 @@ def load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder=
     tss_imgs_us = np.loadtxt(os.path.join(path, img_folder, f"image_timestamps_{suffix}.txt"))
     dT_ms_trigger_period = np.diff(tss_imgs_us).mean()/1e3 
     assert dT_ms_trigger_period > 3 and dT_ms_trigger_period < 100 # dt_ms on tumvie is 50ms
-    tss_imgs_us = tss_imgs_us[[idxss]]
+    tss_imgs_us = tss_imgs_us[idxss]
 
     # compute center timestamps (events associated with image at time t0 are taken from (t0 - 0.5dT, t0 + 0.5dT))
     tss_evs_centers_us = np.insert(tss_imgs_us, 0, tss_imgs_us[0]-2*dT_ms_trigger_period*1e3)
@@ -991,7 +993,7 @@ class NGPDataset(Dataset):
         print(f'[INFO] average radius before scaling with {self.scale} = {np.linalg.norm(ps[:, :3, 3], axis=-1).mean()}')
 
         for i, f in enumerate(frames):
-            f_path = os.path.join(self.root_path, f['file_path'])
+            f_path = f['file_path']
 
             # there are non-exist paths in fox...
             if not os.path.exists(f_path):

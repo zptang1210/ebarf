@@ -7,6 +7,16 @@ import json
 import shutil
 import h5py
 import glob
+
+import sys
+# Get the current script's directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory by going one level up
+parent_dir = os.path.dirname(current_dir)
+# Add the parent directory to sys.path
+sys.path.append(parent_dir)
+
+
 from utils.event_utils import *
 from nerf.provider import NeRFDataset, EventNeRFDataset
 from nerf.utils import Trainer, PSNRMeter

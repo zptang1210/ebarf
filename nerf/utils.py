@@ -440,7 +440,8 @@ class Trainer(object):
         if debug == False and not opt.render_mode:
             codePath = os.path.join(self.workspace, "code_" + self.slurm_id + "_" + self.process_id + "/")
             print(f"Copying this code from {code_dir} to {codePath}")
-            shutil.copytree(code_dir, codePath, symlinks=True, dirs_exist_ok=True)
+            # BUG
+            # shutil.copytree(code_dir, codePath, symlinks=True, dirs_exist_ok=True)
 
         self.log(f'[INFO] Trainer: {self.name} | {self.time_stamp} | {self.device} | {"fp16" if self.fp16 else "fp32"} | {self.workspace}')
         self.log(f'[INFO] #parameters: {sum([p.numel() for p in model.parameters() if p.requires_grad])}')

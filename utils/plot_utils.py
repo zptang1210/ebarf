@@ -19,7 +19,7 @@ def render_ev_accumulation(x: np.ndarray, y: np.ndarray, pol: np.ndarray, H: int
     pol = pol.astype('int')
     pol[pol==0]=-1
     mask1 = (x>=0)&(y>=0)&(W>x)&(H>y)
-    mask[y[mask1].astype(np.int), x[mask1].astype(np.int)] = pol[mask1]
+    mask[y[mask1].astype(np.int32), x[mask1].astype(np.int32)] = pol[mask1]
     img[mask==0]=[255,255,255]
     img[mask==-1]=[255,0,0]
     img[mask==1]=[0,0,255] 
