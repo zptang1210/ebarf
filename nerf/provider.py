@@ -3,6 +3,7 @@ import cv2
 import glob
 import json
 import tqdm
+import pickle
 import numpy as np
 import shutil
 from scipy.spatial.transform import Slerp, Rotation
@@ -1108,7 +1109,7 @@ class NeRFDataset(NGPDataset):
         return loader
 
 class EventNeRFDataset(NGPDataset):
-    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None):
+    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, cached_data=None):
         """
         Input
         events_in: (N, 5)
@@ -1140,6 +1141,7 @@ class EventNeRFDataset(NGPDataset):
         self.no_evs = {}
         self.xy_numEvs_Idx = {}
 
+        # Setting up Event-Pose-Interpolators
         self.tss_poses_hf_ns = np.stack([p["ts_ns"] for p in self.poses_hf])  
         self.rots_hf = np.stack([p["pose_c2w"][:3, :3] for p in self.poses_hf])  
         self.trans_hf = np.stack([p["pose_c2w"][:3, 3] for p in self.poses_hf]) 
@@ -1147,87 +1149,140 @@ class EventNeRFDataset(NGPDataset):
         self.trans_interpolator = interp1d(x=self.tss_poses_hf_ns, y=self.trans_hf, axis=0, kind="cubic", bounds_error=True)
 
         # [todo]: precompute once
-        print(f"Starting to compute {len(evs_batches_ns_tmp)} evs_dict_xy")
-        N_evs_batches = len(evs_batches_ns_tmp)
-        for i in range(N_evs_batches):
-            current_frame = self.frame_idxs[i]
+        # * cache_data is None: we want to compute all the data anyway. cache_data is a path: we want to load the data if the path is valid, otherwise, we will compute the data and save the cache.
+        # * if cached_data is None or the stored file path doesn't exists, then we have to compute all the data from scratch. After that, we can save the computed data to cache_data
+        # * otherwise, we can load the cache to prevent the following time-consuming computation in the for loop
+        # * first we need to check if the evs_batches_ns_tmp and no_events are the same as the one stored in the cache file
+        # * then we load self.xy_numEvs_idx, self.num_evs, self.idx_no_successor, self.num_successor_evs (!={} when self.accumulate_evs is True),
+        # * self.events, self.poses_evs (!={} when precompute_evs_poses is True).
+        # * notice that self.no_evs (!={} when self.negative_event_sampling is True) is not cached since it's computed after the for loop.
+        if cached_data is None or not os.path.exists(cached_data):
+            print('* Compute init data of EventNeRFDataset...')
+            evs_batches_ns_tmp_backup = list(evs_batches_ns_tmp) # * evs_batches_ns_tmp will shrink in each for iteration, back it up for caching.
+            print(f"Starting to compute {len(evs_batches_ns_tmp)} evs_dict_xy")
+            N_evs_batches = len(evs_batches_ns_tmp)
+            for i in range(N_evs_batches):
+                current_frame = self.frame_idxs[i]
 
-            events_in = evs_batches_ns_tmp.pop(0)
-            events_in = events_in.astype(np.float32)
-            events_in = np.asarray(sorted(events_in, key=lambda x: x[2]))   
+                events_in = evs_batches_ns_tmp.pop(0)
+                events_in = events_in.astype(np.float32)
+                events_in = np.asarray(sorted(events_in, key=lambda x: x[2]))   
 
-            # create evs_dict_xy with key: (x,y) and value: ev-tuple (x, y, z, t_ns, pol)
-            evs_dict_xy = {}
-            for ev in events_in:
-                key_xy = (ev[0], ev[1])
-                if key_xy in evs_dict_xy.keys():
-                    evs_dict_xy[key_xy].append(ev.tolist())
-                else:
-                    evs_dict_xy[key_xy] = [ev.tolist()]
-            # filter dictonary s.t. > 1 ev per pixel
-            evs_dict_xy = dict((k, v) for k, v in evs_dict_xy.items() if len(v) > 1) 
-            del events_in
-            
-            # compute pair of (numEvs, Index) for each pixel (where there is >1 event)
-            xys_mtNevs = list(evs_dict_xy.keys())
-            num_evs_at_xy = np.asarray([len(evs_dict_xy[xy]) for xy in xys_mtNevs])
-            xys_mtNevs = np.asarray(xys_mtNevs).astype(np.uint32)
-            self.xy_numEvs_Idx[current_frame] = np.concatenate((num_evs_at_xy[:, None], np.append(0, np.cumsum(num_evs_at_xy)[:-1])[:, None]), axis=1)
-            assert np.all(num_evs_at_xy > 1)
-
-            # save the Index of last event at pixel xy
-            cumnum_evs_at_xy = np.cumsum(num_evs_at_xy) # (M)
-            self.num_evs[current_frame] = cumnum_evs_at_xy[-1]
-            # idx_no_successor is index (in [0, num_evs-1]) for which there is no following event at same xy
-            self.idx_no_successor[current_frame] = cumnum_evs_at_xy - 1 # (M)
-            
-            if self.accumulate_evs:
-                num_successor_evs = np.zeros(self.num_evs[current_frame]).astype(np.int64)
-                j = 0
-                for id in range(self.num_evs[current_frame]):
-                    if id >= cumnum_evs_at_xy[j]:
-                        j += 1
-                    num_successor_evs[id] = cumnum_evs_at_xy[j] - id - 1 # -1 to substract itself. np.Tensor (M,)
-                self.num_successor_evs[current_frame] = num_successor_evs
-            
-            # flatten evs_dict_xy to linear self.events np.array (N, 5) 
-            for xy in list(evs_dict_xy.keys()):
-                evs = evs_dict_xy[xy]
-                for ev in evs:
-                    if current_frame in self.events:
-                        self.events[current_frame].append(ev)
+                # create evs_dict_xy with key: (x,y) and value: ev-tuple (x, y, z, t_ns, pol)
+                evs_dict_xy = {}
+                for ev in events_in:
+                    key_xy = (ev[0], ev[1])
+                    if key_xy in evs_dict_xy.keys():
+                        evs_dict_xy[key_xy].append(ev.tolist())
                     else:
-                        self.events[current_frame] = [ev]
-                del evs_dict_xy[xy]  # delete each key, to keep max-memory low
+                        evs_dict_xy[key_xy] = [ev.tolist()]
+                # filter dictonary s.t. > 1 ev per pixel
+                evs_dict_xy = dict((k, v) for k, v in evs_dict_xy.items() if len(v) > 1) 
+                # del events_in # * disable this because evs_batches_ns_tmp_backup is not deep copied
+                
+                # compute pair of (numEvs, Index) for each pixel (where there is >1 event)
+                xys_mtNevs = list(evs_dict_xy.keys())
+                num_evs_at_xy = np.asarray([len(evs_dict_xy[xy]) for xy in xys_mtNevs])
+                xys_mtNevs = np.asarray(xys_mtNevs).astype(np.uint32)
+                self.xy_numEvs_Idx[current_frame] = np.concatenate((num_evs_at_xy[:, None], np.append(0, np.cumsum(num_evs_at_xy)[:-1])[:, None]), axis=1)
+                assert np.all(num_evs_at_xy > 1)
 
-            evs_dict_xy.clear()
-            del evs_dict_xy
-            self.events[current_frame] = np.asarray(self.events[current_frame]).astype(np.float32)
-            assert self.num_evs[current_frame] == self.events[current_frame].shape[0]
+                # save the Index of last event at pixel xy
+                cumnum_evs_at_xy = np.cumsum(num_evs_at_xy) # (M)
+                self.num_evs[current_frame] = cumnum_evs_at_xy[-1]
+                # idx_no_successor is index (in [0, num_evs-1]) for which there is no following event at same xy
+                self.idx_no_successor[current_frame] = cumnum_evs_at_xy - 1 # (M)
+                
+                if self.accumulate_evs:
+                    num_successor_evs = np.zeros(self.num_evs[current_frame]).astype(np.int64)
+                    j = 0
+                    for id in range(self.num_evs[current_frame]):
+                        if id >= cumnum_evs_at_xy[j]:
+                            j += 1
+                        num_successor_evs[id] = cumnum_evs_at_xy[j] - id - 1 # -1 to substract itself. np.Tensor (M,)
+                    self.num_successor_evs[current_frame] = num_successor_evs
+                
+                # flatten evs_dict_xy to linear self.events np.array (N, 5) 
+                for xy in list(evs_dict_xy.keys()):
+                    evs = evs_dict_xy[xy]
+                    for ev in evs:
+                        if current_frame in self.events:
+                            self.events[current_frame].append(ev)
+                        else:
+                            self.events[current_frame] = [ev]
+                    del evs_dict_xy[xy]  # delete each key, to keep max-memory low
 
-            if self.precompute_evs_poses:
-                # [alternative] option2: pre-interpolate (fast, but large memory requirement)
-                eval_tss_evs_ns = self.events[current_frame][:, 2].copy() 
-                rots = self.rot_interpolator(eval_tss_evs_ns).as_matrix().astype(np.float32) 
-                trans = self.trans_interpolator(eval_tss_evs_ns).astype(np.float32)
-                # [debug]: uncomment to plot event-poses
-                # plotting_poses_evs(self.workspace, rots, trans, eval_tss_evs_ns)
-                N = rots.shape[0]
-                pose_N_3_4 = np.zeros((N, 3, 4)).astype(np.float32)
-                pose_N_3_4[:N, :3, :3] = rots.copy().astype(np.float32)  # (N, 3, 3)
-                pose_N_3_4[:N, :3, 3:4] = np.expand_dims(trans, axis=-1).copy().astype(np.float32) # (N, 3, 1)
-                self.poses_evs[current_frame] = pose_N_3_4.copy()
-                del rots
-                del trans
-                del eval_tss_evs_ns
-            print(f"Batch {i+1}/{(N_evs_batches)} dict from events and interpolated poses per event")
+                evs_dict_xy.clear()
+                del evs_dict_xy
+                self.events[current_frame] = np.asarray(self.events[current_frame]).astype(np.float32)
+                assert self.num_evs[current_frame] == self.events[current_frame].shape[0]
+
+                if self.precompute_evs_poses:
+                    # [alternative] option2: pre-interpolate (fast, but large memory requirement)
+                    eval_tss_evs_ns = self.events[current_frame][:, 2].copy() 
+                    rots = self.rot_interpolator(eval_tss_evs_ns).as_matrix().astype(np.float32) 
+                    trans = self.trans_interpolator(eval_tss_evs_ns).astype(np.float32)
+                    # [debug]: uncomment to plot event-poses
+                    # plotting_poses_evs(self.workspace, rots, trans, eval_tss_evs_ns)
+                    N = rots.shape[0]
+                    pose_N_3_4 = np.zeros((N, 3, 4)).astype(np.float32)
+                    pose_N_3_4[:N, :3, :3] = rots.copy().astype(np.float32)  # (N, 3, 3)
+                    pose_N_3_4[:N, :3, 3:4] = np.expand_dims(trans, axis=-1).copy().astype(np.float32) # (N, 3, 1)
+                    self.poses_evs[current_frame] = pose_N_3_4.copy()
+                    del rots
+                    del trans
+                    del eval_tss_evs_ns
+                print(f"Batch {i+1}/{(N_evs_batches)} dict from events and interpolated poses per event")
         
-        # Setting up Event-Pose-Interpolators
-        self.tss_poses_hf_ns = np.stack([p["ts_ns"] for p in self.poses_hf])  
-        self.rots_hf = np.stack([p["pose_c2w"][:3, :3] for p in self.poses_hf])  
-        self.trans_hf = np.stack([p["pose_c2w"][:3, 3] for p in self.poses_hf]) 
-        self.rot_interpolator = Slerp(self.tss_poses_hf_ns, R.from_matrix(self.rots_hf)) 
-        self.trans_interpolator = interp1d(x=self.tss_poses_hf_ns, y=self.trans_hf, axis=0, kind="cubic", bounds_error=True)
+            # * save the above-mentioned variables into a cache file
+            if cached_data is not None:
+                print('* Save the computed init data to cache file for future reusage...')
+                cache = {'evs_batches_ns_tmp': evs_batches_ns_tmp_backup,
+                         'no_events': no_events,
+                         'xy_numEvs_Idx': self.xy_numEvs_Idx,
+                         'num_evs': self.num_evs,
+                         'idx_no_successor': self.idx_no_successor,
+                         'num_successor_evs': self.num_successor_evs,
+                         'events': self.events,
+                         'poses_evs': self.poses_evs
+                         }
+                with open(cached_data, 'wb') as fout:
+                    pickle.dump(cache, fout)
+                
+        else:
+            # * load the cache
+            print('* Load the cached init data for EventNeRFDataset...')
+            with open(cached_data, 'rb') as fin:
+                cache = pickle.load(fin)
+
+            # * check if the saved cache data matches the current session
+            print('* Check if the saved cache data matches the current session...')
+            evs_batches_ns_tmp_pkl = cache['evs_batches_ns_tmp']
+            if len(evs_batches_ns_tmp_pkl) == len(evs_batches_ns_tmp):
+                are_equal = all(np.array_equal(a, b) for a, b in zip(evs_batches_ns_tmp_pkl, evs_batches_ns_tmp))
+                assert are_equal, 'The cached file does not match the current session due to unmatched evs_batches_ns.'
+
+            if cache['no_events'] is not None:
+                # todo
+                raise NotImplementedError('not implemented the module for negative sampling yet...')
+
+            # * load data
+            print(cache.keys())
+            self.evs_batches_ns_tmp = cache['evs_batches_ns_tmp']
+            self.no_events = cache['no_events']
+            self.xy_numEvs_Idx = cache['xy_numEvs_Idx']
+            self.num_evs = cache['num_evs']
+            self.idx_no_successor = cache['idx_no_successor']
+            self.events = cache['events']
+            self.poses_evs = cache['poses_evs']
+
+        # * redundant
+        # # Setting up Event-Pose-Interpolators
+        # self.tss_poses_hf_ns = np.stack([p["ts_ns"] for p in self.poses_hf])  
+        # self.rots_hf = np.stack([p["pose_c2w"][:3, :3] for p in self.poses_hf])  
+        # self.trans_hf = np.stack([p["pose_c2w"][:3, 3] for p in self.poses_hf]) 
+        # self.rot_interpolator = Slerp(self.tss_poses_hf_ns, R.from_matrix(self.rots_hf)) 
+        # self.trans_interpolator = interp1d(x=self.tss_poses_hf_ns, y=self.trans_hf, axis=0, kind="cubic", bounds_error=True)
 
         # float32-cast
         if self.negative_event_sampling:
