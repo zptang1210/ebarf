@@ -8,6 +8,7 @@ import numpy as np
 import shutil
 from scipy.spatial.transform import Slerp, Rotation
 
+import pathvalidate
 import h5py
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -100,7 +101,36 @@ def load_event_data_esim(datadir, idxs, hwf=None, img_folder="images"):
 #####################
 # Loading tumvie
 #####################
-def load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder="left_images"):
+def _load_event_data_tumvie_from_cache(path, idxs, hotpixs=False, H=720, W=1280, img_folder="left_images"):
+    cache_folder = os.path.join('output', 'event_data_cache')
+    valid_path_name = pathvalidate.sanitize_filename(path, replacement_text='-')
+    idxs_str = '-'.join(map(str, idxs))
+    img_folder_name = pathvalidate.sanitize_filename(img_folder, replacement_text='-')
+    cache_file = f'cache_load_event_data_tumvie_{valid_path_name}_{idxs_str}_{hotpixs}_{H}_{W}_{img_folder_name}.pickle'
+    cache_path = os.path.join(cache_folder, cache_file)
+    os.makedirs(cache_folder, exist_ok=True)
+    if os.path.exists(cache_path):
+        print(f'found cached event data {cache_file}, trying to load the cache...')
+        with open(cache_path, 'rb') as fin:
+            cache = pickle.load(fin)
+        evs_out = cache['evs_out']
+        hists = cache['hists']
+        coords = cache['coords']
+        rectify_map = cache['rectify_map']
+        tss_evs_centers_us = cache['tss_evs_centers_us']
+    else:
+        evs_out, hists, coords, rectify_map, tss_evs_centers_us = _load_event_data_tumvie(path, idxs, hotpixs=hotpixs, H=H, W=W, img_folder=img_folder)
+        with open(cache_path, 'wb') as fout:
+            cache = {'evs_out': evs_out,
+                     'hists': hists,
+                     'coords': coords,
+                     'rectify_map': rectify_map,
+                     'tss_evs_centers_us': tss_evs_centers_us}
+            pickle.dump(cache, fout)
+
+    return evs_out, hists, coords, rectify_map, tss_evs_centers_us
+
+def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder="left_images"):
     idxss = sorted(idxs)
 
     if "left" in img_folder:
@@ -198,6 +228,8 @@ def load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder=
     print(f"Got total events of {np.asarray(durs_ms).sum()}ms, with pos/neg = {posneg}")
     
     return evs_out, hists, coords, rectify_map, tss_evs_centers_us
+
+load_event_data_tumvie = _load_event_data_tumvie_from_cache
 
 #####################
 # Loading eds
