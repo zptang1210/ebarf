@@ -16,6 +16,67 @@ except ImportError:
 # utils
 # ----------------------------------------
 
+class near_far_from_aabb_torch(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, rays_o, rays_d, aabb, min_near=0.2):
+        # if not rays_o.is_cuda: rays_o = rays_o.cuda()
+        # if not rays_d.is_cuda: rays_d = rays_d.cuda()
+
+        rays_o = rays_o.contiguous().view(-1, 3)
+        rays_d = rays_d.contiguous().view(-1, 3)
+
+        N = rays_o.shape[0] # num rays
+
+        nears = torch.empty(N, dtype=rays_o.dtype, device=rays_o.device)
+        fars = torch.empty(N, dtype=rays_o.dtype, device=rays_o.device)
+
+        inf = torch.finfo(nears.dtype).max
+
+        ox, oy, oz = rays_o[:, 0], rays_o[:, 1], rays_o[:, 2]
+        dx, dy, dz = rays_d[:, 0], rays_d[:, 1], rays_d[:, 2]
+        rdx, rdy, rdz = 1 / dx, 1 / dy, 1 / dz
+
+        near_x_ = (aabb[0] - ox) * rdx
+        far_x_ = (aabb[3] - ox) * rdx
+        near_x = torch.where(near_x_ < far_x_, near_x_, far_x_) # if (near > far) swapf(near, far);
+        far_x = torch.where(near_x_ < far_x_, far_x_, near_x_)
+
+        near_y_ = (aabb[1] - oy) * rdy
+        far_y_ = (aabb[4] - oy) * rdy
+        near_y = torch.where(near_y_ < far_y_, near_y_, far_y_)
+        far_y = torch.where(near_y_ < far_y_, far_y_, near_y_)
+
+        inf_mask_xy_1 = near_x > far_y
+        inf_mask_xy_2 = near_y > far_x
+
+        max_near_xy = torch.maximum(near_x, near_y)
+        min_far_xy = torch.minimum(far_x, far_y)
+
+        near_z_ = (aabb[2] - oz) * rdz
+        far_z_ = (aabb[5] - oz) * rdz
+        near_z = torch.where(near_z_ < far_z_, near_z_, far_z_)
+        far_z = torch.where(near_z_ < far_z_, far_z_, near_z_)
+
+        inf_mask_xz_1 = max_near_xy > far_z
+        inf_mask_xz_2 = near_z > min_far_xy
+
+        nears = torch.maximum(max_near_xy, near_z)
+        fars = torch.minimum(min_far_xy, far_z)
+        nears[inf_mask_xy_1] = inf
+        nears[inf_mask_xy_2] = inf
+        nears[inf_mask_xz_1] = inf
+        nears[inf_mask_xz_2] = inf
+        fars[inf_mask_xy_1] = inf
+        fars[inf_mask_xy_2] = inf
+        fars[inf_mask_xz_1] = inf
+        fars[inf_mask_xz_2] = inf
+        nears = torch.where(nears < min_near, torch.tensor(min_near, dtype=nears.dtype).to(nears.device), nears)
+
+        return nears, fars
+
+
 class _near_far_from_aabb(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float32)

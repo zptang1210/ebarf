@@ -91,8 +91,11 @@ class NeRFRenderer(nn.Module):
                  min_near=0.2,
                  density_thresh=0.01,
                  bg_radius=-1,
+                 DEBUG=False
                  ):
         super().__init__()
+
+        self.DEBUG = DEBUG # * check if the self-implemented raymarching is correct
 
         self.bound = bound
         self.cascade = 1 + math.ceil(math.log2(bound))
@@ -108,6 +111,8 @@ class NeRFRenderer(nn.Module):
         aabb_infer = aabb_train.clone()
         self.register_buffer('aabb_train', aabb_train)
         self.register_buffer('aabb_infer', aabb_infer)
+
+        self.near_far_from_aabb_torch = raymarching.near_far_from_aabb_torch()
 
         # extra state for cuda raymarching
         self.cuda_ray = cuda_ray
@@ -163,9 +168,17 @@ class NeRFRenderer(nn.Module):
         aabb = self.aabb_train if self.training else self.aabb_infer
 
         # sample steps
-        nears, fars = raymarching.near_far_from_aabb(rays_o, rays_d, aabb, self.min_near)
+        if self.DEBUG:
+            nears_, fars_ = raymarching.near_far_from_aabb(rays_o, rays_d, aabb, self.min_near)
+            nears_.unsqueeze_(-1)
+            fars_.unsqueeze_(-1)
+
+        nears, fars = self.near_far_from_aabb_torch(rays_o, rays_d, aabb, self.min_near)
         nears.unsqueeze_(-1)
         fars.unsqueeze_(-1)
+
+        if self.DEBUG:
+            assert torch.allclose(nears, nears_) and torch.allclose(fars, fars_)
 
         #print(f'nears = {nears.min().item()} ~ {nears.max().item()}, fars = {fars.min().item()} ~ {fars.max().item()}')
 

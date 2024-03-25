@@ -474,7 +474,6 @@ class EventNeRFDataset(NGPDataset):
                 raise NotImplementedError('not implemented the module for negative sampling yet...')
 
             # * load data
-            print(cache.keys())
             self.evs_batches_ns_tmp = cache['evs_batches_ns_tmp']
             self.no_events = cache['no_events']
             self.xy_numEvs_Idx = cache['xy_numEvs_Idx']

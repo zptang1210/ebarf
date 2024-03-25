@@ -248,6 +248,18 @@ def extract_geometry(bound_min, bound_max, resolution, threshold, query_func):
     vertices = vertices / (resolution - 1.0) * (b_max_np - b_min_np)[None, :] + b_min_np[None, :]
     return vertices, triangles
 
+def get_universal_workspace_path(opt, mkdir=True):
+    conffile = os.path.basename(opt.config)
+    p, upfolder = os.path.split(os.path.dirname(opt.config))
+    upupfolder = os.path.split(p)[1]
+    # * changed the workspace folder
+    # expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
+    expname = '_'.join([opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4]])
+    workspace = os.path.join(opt.outdir, expname)
+
+    if mkdir and (not os.path.exists(workspace)):
+        os.makedirs(workspace, exist_ok=True)
+    return workspace
 
 class PSNRMeter:
     def __init__(self, opt, select_frames):
@@ -390,13 +402,7 @@ class Trainer(object):
         if len(metrics) == 0 or self.use_loss_as_metric:
             self.best_mode = 'min'
 
-        conffile = os.path.basename(opt.config)
-        p, upfolder = os.path.split(os.path.dirname(opt.config))
-        upupfolder = os.path.split(p)[1]
-        # * changed the workspace folder
-        # expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
-        expname = '_'.join([opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4]])
-        self.workspace = os.path.join(opt.outdir, expname)
+        self.workspace = get_universal_workspace_path(opt)
         print(f"Logging results to {self.workspace}")
 
         # workspace prepare
@@ -444,6 +450,7 @@ class Trainer(object):
             print(f"Copying this code from {code_dir} to {codePath}")
             # * fixed the bug of copying a folder into the same folder.
             # shutil.copytree(code_dir, codePath, symlinks=True, dirs_exist_ok=True)
+            # * skip this line to accelerate debugging
             shutil.copytree(code_dir, codePath, symlinks=True, dirs_exist_ok=True, ignore=shutil.ignore_patterns('output', 'data', '*.out'))
 
         self.log(f'[INFO] Trainer: {self.name} | {self.time_stamp} | {self.device} | {"fp16" if self.fp16 else "fp32"} | {self.workspace}')
@@ -1100,19 +1107,21 @@ class Trainer(object):
                     # per-image PSNR. chose truths[0] and preds[0] for rgb-view
                     gt_cpu, pred_cpu = truths[0].detach().cpu(), preds[0].detach().cpu()
                     psnr_ = compute_pnsr(gt_cpu.numpy(), pred_cpu.numpy(), max_val=1)
-                    self.writer.add_scalar(f"psnr/{self.local_step}", psnr_, self.global_step)
+                    # * add "if self.use_tensorboardX:" to prevent the case that self.writer is not defined
+                    if self.use_tensorboardX: self.writer.add_scalar(f"psnr/{self.local_step}", psnr_, self.global_step)
                     psnrs.append(psnr_)
 
                     # per-image LPIPS
                     lpips_alex, lpips_vgg = compute_lpips(gt_cpu, pred_cpu, self.out_dim_color)
-                    self.writer.add_scalar(f"lpips_alex/{self.local_step}", lpips_alex, self.global_step)
-                    self.writer.add_scalar(f"lpips_vgg/{self.local_step}", lpips_vgg, self.global_step)
+                    if self.use_tensorboardX:
+                        self.writer.add_scalar(f"lpips_alex/{self.local_step}", lpips_alex, self.global_step)
+                        self.writer.add_scalar(f"lpips_vgg/{self.local_step}", lpips_vgg, self.global_step)
                     lipss_alex.append(lpips_alex)
                     lipss_vggs.append(lpips_vgg)
 
                     # per-image SSIM
                     ssim_ = ssim(gt_cpu.numpy()[...,0], pred_cpu.numpy()[...,0], data_range=1)
-                    self.writer.add_scalar(f"ssim/{self.local_step}", ssim_, self.global_step)
+                    if self.use_tensorboardX: self.writer.add_scalar(f"ssim/{self.local_step}", ssim_, self.global_step)
                     ssims.append(ssim_)
                     
                     if self.opt.color_space == 'linear':
@@ -1184,8 +1193,9 @@ class Trainer(object):
                 preds_logs = torch.stack(preds_logs) # (len(val_idxs), H, W, C)
                 imgs_gt_log = torch.stack(imgs_gt_log)
                 a, b = solve_normal_equations(preds_logs, imgs_gt_log)
-                self.writer.add_scalar(f"a/", a, self.global_step)
-                self.writer.add_scalar(f"b/", b, self.global_step)
+                if self.use_tensorboardX:
+                    self.writer.add_scalar(f"a/", a, self.global_step)
+                    self.writer.add_scalar(f"b/", b, self.global_step)
 
                 if (loader._data.mode == "tumvie" or loader._data.mode == "eds") and self.eval_stereo_views:
                     if self.out_dim_color == 3:
@@ -1204,18 +1214,18 @@ class Trainer(object):
                     psnr_cor = compute_pnsr(gt_j.numpy(), pred_cor_j.numpy(), max_val=255)
                     psnrs_cor.append(psnr_cor)
                     self.log(f"psnr-corrected = {psnr_cor}")
-                    self.writer.add_scalar(f"psnr-corrected/{j}", psnr_cor, self.global_step)
+                    if self.use_tensorboardX: self.writer.add_scalar(f"psnr-corrected/{j}", psnr_cor, self.global_step)
 
                     # per-image LPIPS
                     lpips_alex_cor, lpips_vgg_cor = compute_lpips(gt_j, pred_cor_j, self.out_dim_color)
-                    self.writer.add_scalar(f"lpips_alex/{j}", lpips_alex_cor, self.global_step)
-                    self.writer.add_scalar(f"lpips_vgg/{j}", lpips_vgg_cor, self.global_step)
+                    if self.use_tensorboardX: self.writer.add_scalar(f"lpips_alex/{j}", lpips_alex_cor, self.global_step)
+                    if self.use_tensorboardX: self.writer.add_scalar(f"lpips_vgg/{j}", lpips_vgg_cor, self.global_step)
                     lipss_alex_cor.append(lpips_alex_cor)
                     lipss_vggs_cor.append(lpips_vgg_cor)
 
                     # per-image SSIM
                     ssim_cor = ssim(gt_j.numpy()[...,0], pred_cor_j.numpy()[...,0], data_range=255)
-                    self.writer.add_scalar(f"ssim/{j}", ssim_cor, self.global_step)
+                    if self.use_tensorboardX: self.writer.add_scalar(f"ssim/{j}", ssim_cor, self.global_step)
                     ssims_cor.append(ssim_cor)
 
                     # Make outfolders
@@ -1263,16 +1273,18 @@ class Trainer(object):
                     if self.epoch <= self.eval_interval:
                         cv2.imwrite(save_path_gt, cv2.cvtColor((all_gts[j][0].detach().cpu().numpy() * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
                 # end loop over j (all_gts)
-                self.writer.add_scalar("psnr-corrected/mean", np.asarray(psnrs_cor).mean(), self.global_step)
-                self.writer.add_scalar("lpips_vgg/mean", np.asarray(lipss_vggs_cor).mean(), self.global_step)
-                self.writer.add_scalar("lpips_alex/mean", np.asarray(lipss_alex_cor).mean(), self.global_step)
-                self.writer.add_scalar("ssim/mean", np.asarray(ssims_cor).mean(), self.global_step)
+                if self.use_tensorboardX:
+                    self.writer.add_scalar("psnr-corrected/mean", np.asarray(psnrs_cor).mean(), self.global_step)
+                    self.writer.add_scalar("lpips_vgg/mean", np.asarray(lipss_vggs_cor).mean(), self.global_step)
+                    self.writer.add_scalar("lpips_alex/mean", np.asarray(lipss_alex_cor).mean(), self.global_step)
+                    self.writer.add_scalar("ssim/mean", np.asarray(ssims_cor).mean(), self.global_step)
             ### end saving corrected images
             else:
-                self.writer.add_scalar("psnr/mean", np.asarray(psnrs).mean(), self.global_step)
-                self.writer.add_scalar("lpips_vgg/vgg_mean", np.asarray(lipss_vggs).mean(), self.global_step)
-                self.writer.add_scalar("lpips_alex/alex_mean", np.asarray(lipss_alex).mean(), self.global_step)
-                self.writer.add_scalar("ssim/ssim_mean", np.asarray(ssims).mean(), self.global_step)
+                if self.use_tensorboardX:
+                    self.writer.add_scalar("psnr/mean", np.asarray(psnrs).mean(), self.global_step)
+                    self.writer.add_scalar("lpips_vgg/vgg_mean", np.asarray(lipss_vggs).mean(), self.global_step)
+                    self.writer.add_scalar("lpips_alex/alex_mean", np.asarray(lipss_alex).mean(), self.global_step)
+                    self.writer.add_scalar("ssim/ssim_mean", np.asarray(ssims).mean(), self.global_step)
 
         average_loss = total_loss / self.local_step
         self.stats["valid_loss"].append(average_loss)

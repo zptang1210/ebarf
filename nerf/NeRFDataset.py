@@ -28,8 +28,9 @@ from .NGPDataset import NGPDataset
 
 
 class NeRFDataset(NGPDataset):
-    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None):
+    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, get_rays_evs_on_collate=True):
         super().__init__(opt, device, type=type, downscale=downscale, n_test=n_test, select_frames=select_frames)
+        self.get_rays_evs_on_collate = get_rays_evs_on_collate # * This should be False when using ebarf since we don't predict evCam's views!
 
     def collate(self, index):
         B = len(index) # always 1
@@ -57,7 +58,7 @@ class NeRFDataset(NGPDataset):
             results['index'] = index
             results['inds_coarse'] = rays['inds_coarse']
 
-        if (self.mode == "tumvie" or self.mode == "eds") and self.type == "val":
+        if (self.mode == "tumvie" or self.mode == "eds") and self.type == "val" and self.get_rays_evs_on_collate: 
             poses_evCam = self.poses_evCam_atValIdxs[index, ...].to(self.device)
             rays = get_rays(poses_evCam, self.intrinsics_evs, self.H_ev, self.W_ev, self.num_rays, error_map)
             results['rays_evs_o'] = rays['rays_o']

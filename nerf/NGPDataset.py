@@ -12,7 +12,7 @@ import h5py
 import torch
 from torch.utils.data import DataLoader, Dataset
 import yaml
-from .utils import get_rays, get_event_rays
+from .utils import get_rays, get_event_rays, get_universal_workspace_path
 from utils.pose_utils import *
 from utils.plot_utils import *
 from utils.event_utils import *
@@ -201,14 +201,8 @@ class NGPDataset(Dataset):
         self.imgdir = None
 
         # Experiment logging
-        conffile = os.path.basename(opt.config)
-        p, upfolder = os.path.split(os.path.dirname(opt.config))
-        upupfolder = os.path.split(p)[1]
-        # * changed the workspace folder
-        # expname = os.path.join(opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4])
-        expname = '_'.join([opt.expweek, opt.expname, upupfolder, upfolder+"_"+conffile[:-4]])
-        self.workspace = os.path.join(opt.outdir, expname)
-        print(f"Dataloader uses {self.workspace} as workspace, too.")
+        self.workspace = get_universal_workspace_path(opt)
+        print(f"Dataloader uses {self.workspace} as workspace.")
 
         if select_frames is not None:
             if type == 'train':

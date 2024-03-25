@@ -43,4 +43,5 @@ def read_K(path):
 from .NGPDataset import NGPDataset
 from .NeRFDataset import NeRFDataset
 from .EventNeRFDataset import EventNeRFDataset
+from .EventBARFDataset import EventBARFDataset
 
