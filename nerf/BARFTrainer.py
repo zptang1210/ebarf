@@ -431,7 +431,7 @@ class BARFTrainer(Trainer):
         poses_hf_dict = {'poses_hf': self.model.poses_hf.detach().cpu(),
                          'poses_hf_ref': poses_hf_ref,
                          'epoch': self.epoch}
-        with open(os.path.join(save_poses_hf_ref_path, f'poses_hf_ref_{self.epoch:04d}.pickle'), 'wb') as fout:
+        with open(os.path.join(save_poses_hf_ref_path, f'poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
             pickle.dump(poses_hf_dict, fout)
 
 

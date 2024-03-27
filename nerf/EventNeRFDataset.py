@@ -257,7 +257,7 @@ def load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
     assert dT_ms_trigger_period > 3 and dT_ms_trigger_period < 50
     assert tss_imgs_us[0] - (evs["t"][0]) < 1e6 and tss_imgs_us[0] - (evs["t"][0]) > 0
     assert tss_imgs_us[-1] - (evs["t"][-1]) < 1e6 and tss_imgs_us[-1] - (evs["t"][-1]) > 0
-    tss_imgs_us = tss_imgs_us[[idxss]]
+    tss_imgs_us = tss_imgs_us[[idxss]] # todo BUG?
     tss_evs_centers_us = np.insert(tss_imgs_us, 0, tss_imgs_us[0]-2*dT_ms_trigger_period*1e3)
     tss_evs_centers_us = np.insert(tss_evs_centers_us, len(tss_evs_centers_us), tss_evs_centers_us[-1]+2*dT_ms_trigger_period*1e3)
     tss_evs_centers_us = tss_evs_centers_us[:-1] + np.diff(tss_evs_centers_us)/2.
