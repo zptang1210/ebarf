@@ -1,5 +1,6 @@
 import os
 import glob
+import pickle
 import torch
 import tqdm
 import tensorboardX
@@ -421,6 +422,18 @@ class BARFTrainer(Trainer):
         assert self.event_only, "only event_only=True supported."
         assert not self.eval_stereo_views, "we don't support evaluate the event camera's view generation."
         super().evaluate_one_epoch(loader, name=name)
+
+        # * output the refined poses_hf based on current model parameters for visualization
+        save_poses_hf_ref_path = os.path.join(self.workspace, "validation", "poses_hf_ref_raw")
+        os.makedirs(save_poses_hf_ref_path, exist_ok=True)
+        with torch.no_grad():
+            poses_hf_ref = self.model.compute_refined_poses_hf().detach().cpu()
+        poses_hf_dict = {'poses_hf': self.model.poses_hf.detach().cpu(),
+                         'poses_hf_ref': poses_hf_ref,
+                         'epoch': self.epoch}
+        with open(os.path.join(save_poses_hf_ref_path, f'poses_hf_ref_{self.epoch:04d}.pickle'), 'wb') as fout:
+            pickle.dump(poses_hf_dict, fout)
+
 
     def eval_step_tumvie(self, data, loader):
         raise NotImplemented("we don't support evaluate the event camera's view generation.")

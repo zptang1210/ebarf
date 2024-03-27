@@ -129,7 +129,7 @@ if __name__ == '__main__':
     parser.add_argument('--iters', type=int, default=1000000, help="training iters")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate")
-    parser.add_argument('--lr_pose', type=float, default=1e-3, help="initial learning rate for se3_refine") # todo: edit config file
+    parser.add_argument('--lr_pose', type=float, default=1e-4, help="initial learning rate for se3_refine") # todo: edit config file
     parser.add_argument('--eval_interval', type=int, default=10)
     parser.add_argument('--num_rays', type=int, default=4096, help="num rays sampled per image for each training step")
     parser.add_argument('--cuda_ray', action='store_true', help="use CUDA raymarching instead of pytorch")
