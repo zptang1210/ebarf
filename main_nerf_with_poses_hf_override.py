@@ -1,13 +1,12 @@
 from re import A
+import pickle
 import torch
 import configargparse
-import numpy as np
 
-from nerf.provider import NeRFDataset, EventNeRFDataset, EventBARFDataset
+from nerf.provider import NeRFDataset
+from nerf.EventNeRFDataset_with_poses_hf_override import EventNeRFDataset_with_poses_hf_override
 from nerf.gui import NeRFGUI
 from nerf.utils import *
-from nerf.BARFTrainer import *
-from nerf.network_barf import BARFNetwork
 
 from functools import partial
 from loss import huber_loss
@@ -45,12 +44,22 @@ def get_frames(opt):
     return select_frames
 
 
-def get_barf_model(opt, poses_hf_dict, intrinsics_evs, verbose=True): 
-    if verbose: print(opt)
+def get_model(opt): 
+    if opt.ff:
+        opt.fp16 = True
+        assert opt.bg_radius <= 0, "background model is not implemented for --ff"
+        from nerf.network_ff import NeRFNetwork
+    elif opt.tcnn:
+        opt.fp16 = True
+        assert opt.bg_radius <= 0, "background model is not implemented for --tcnn"
+        from nerf.network_tcnn import NeRFNetwork
+    else:
+        from nerf.network import NeRFNetwork
 
-    model = BARFNetwork(
-        poses_hf_dict,
-        intrinsics_evs,
+    print(opt)
+    seed_everything(opt.seed)
+
+    model = NeRFNetwork(
         encoding="hashgrid",
         bound=opt.bound,
         cuda_ray=opt.cuda_ray,
@@ -61,9 +70,11 @@ def get_barf_model(opt, poses_hf_dict, intrinsics_evs, verbose=True):
         disable_view_direction=opt.disable_view_direction,
         out_dim_color=opt.out_dim_color
     )
+    model_params = list(model.sigma_net.parameters()) + list(model.color_net.parameters())
+    encoding_params = list(model.encoder.parameters())
 
-    if verbose: print('model overview:', model)
-    return model
+    print(model)
+    return model, model_params, encoding_params
 
 
 def assert_config(opt):
@@ -83,12 +94,13 @@ def assert_config(opt):
         assert opt.use_luma == 0
     assert opt.out_dim_color == 1 or opt.out_dim_color == 3
 
+
 if __name__ == '__main__':
     parser = configargparse.ArgumentParser() 
     # Dataset and Logging Options
     parser.add_argument(
         "--config",                                      
-        default="CONFIGDIR/configs/mocapDesk2/mocapDesk2_ebarf.txt",
+        default="CONFIGDIR/configs/mocapDesk2/mocapDesk2_nerf.txt",
         is_config_file=True, 
         help="config file path",
     )
@@ -124,13 +136,11 @@ if __name__ == '__main__':
     parser.add_argument('--weight_loss_rgb', type=float, default=1.0, help="rgb loss weight")
     parser.add_argument('--w_no_ev', type=float, default=1.0, help="rgb loss weight")
     parser.add_argument('--precompute_evs_poses', type=int, default=0, help="preloading poses for each event (much faster, but larger memory required)")
-    parser.add_argument('--noise', type=float, default=0., help="the degree of noise added to ground truth mocap data for event poses interpolation.")
      
     ### training options
     parser.add_argument('--iters', type=int, default=1000000, help="training iters")
     parser.add_argument('--ckpt', type=str, default='latest')
-    parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate")
-    parser.add_argument('--lr_pose', type=float, default=1e-4, help="initial learning rate for se3_refine") # todo: edit config file
+    parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate") 
     parser.add_argument('--eval_interval', type=int, default=10)
     parser.add_argument('--num_rays', type=int, default=4096, help="num rays sampled per image for each training step")
     parser.add_argument('--cuda_ray', action='store_true', help="use CUDA raymarching instead of pytorch")
@@ -173,41 +183,64 @@ if __name__ == '__main__':
     parser.add_argument('--error_map', action='store_true', help="use error map to sample rays")
     parser.add_argument('--clip_text', type=str, default='', help="text input for CLIP guidance")
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
-    parser.add_argument('--poses_hf_save_path', type=str, default=None, help="effetive only when noise>0, save the generated noised poses_hf to the given path")
     parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when noise>0, load the noised poses_hf from the given path instead of getting a new randomized one.")
 
     opt = parser.parse_args()
     assert_config(opt)
 
-    seed_everything(opt.seed) # todo it seems this didn't fully controlled the randomization, even with nerf, should try original implementation
-
+    model, model_params, encoding_params = get_model(opt)
     select_frames = get_frames(opt)
 
     criterion = torch.nn.MSELoss(reduction='none')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    cached_data = os.path.join(get_universal_workspace_path(opt), 'EventNeRFDatasetCached.pickle')
-    train_dataset = EventBARFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, cached_data=cached_data)
-    train_loader = train_dataset.dataloader()
+    if opt.test:
+        trainer = Trainer(opt.expname, opt, model, device=device, criterion=criterion, fp16=opt.fp16, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
 
-    valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()
-
-    # todo: still need to deal with optimizer and model parameters.
-    if opt.noise > 0:
-        model = get_barf_model(opt, train_dataset.get_noised_poses_hf(), train_dataset.intrinsics_evs)
+        if opt.gui:
+            gui = NeRFGUI(opt, trainer)
+            gui.render()
+        
+        else:
+            test_loader = NeRFDataset(opt, device=device, type='test', select_frames=select_frames).dataloader()
+            if opt.mode == 'blender':
+                trainer.evaluate(test_loader)
+            else:
+                trainer.test(test_loader)
+            trainer.save_mesh(resolution=256, threshold=10)
+    
     else:
-        model = get_barf_model(opt, train_dataset.get_gt_poses_hf(), train_dataset.intrinsics_evs)
+        print(f"opt.lr = {opt.lr}")
+        optimizer = lambda model: torch.optim.Adam(model.get_params(opt.lr), betas=(0.9, 0.99), eps=1e-15)
+        scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
 
-    optimizer, scheduler = BARFNetwork.get_optimizer_and_scheduler(opt)
-    trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+        trainer = Trainer(opt.expname, opt, model, device=device, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
 
-    max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
-    print(f"max epochs = {max_epoch}")
-    trainer.train(train_loader, valid_loader, max_epoch)
+        # need different dataset type for GUI/CMD mode.
+        if opt.gui:
+            train_loader = NeRFDataset(opt, device=device, type='train', select_frames=select_frames).dataloader()
+            trainer.train_loader = train_loader # attach dataloader to trainer
 
-    # todo test
-    # # also test
-    # test_loader = NeRFDataset(opt, device=device, type='test', select_frames=select_frames).dataloader()       
-    # trainer.test(test_loader) # colmap doesn't have gt, so just test.
+            gui = NeRFGUI(opt, trainer)
+            gui.render()
+        else:
+            if opt.events:
+                # cached_data = os.path.join(trainer.workspace, 'EventNeRFDatasetCached.pickle')
+                cached_data = os.path.join('output', 'EventNeRFDatasetCached.pickle') # todo make a unique name and put it into cache folder
+                assert opt.poses_hf_load_path is not None
+                with open(opt.poses_hf_load_path, 'rb') as fin:
+                    noised_posed_hf_dict = pickle.load(fin)
+                train_loader = EventNeRFDataset_with_poses_hf_override(opt, noised_posed_hf_dict, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, cached_data=cached_data).dataloader()
+                valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames).dataloader()
+            else:
+                train_loader = NeRFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames).dataloader()
+                valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames).dataloader()
+            max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
+            print(f"max expochs = {max_epoch}")
+            trainer.train(train_loader, valid_loader, max_epoch)
 
-    # trainer.save_mesh(resolution=256, threshold=10)
+            # also test
+            test_loader = NeRFDataset(opt, device=device, type='test', select_frames=select_frames).dataloader()       
+            trainer.test(test_loader) # colmap doesn't have gt, so just test.
+    
+            trainer.save_mesh(resolution=256, threshold=10)

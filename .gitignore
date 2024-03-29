@@ -16,3 +16,5 @@ tensorf/
 TUMVIEDATA/
 output/
 *.out
+
+bookmarks.json

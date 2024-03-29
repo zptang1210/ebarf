@@ -1,5 +1,7 @@
+import pickle
 import numpy as np
 import torch
+from .pose_utils.camera import lie, pose
 from .utils import get_rays
 from .EventNeRFDataset import EventNeRFDataset
 
@@ -7,6 +9,13 @@ class EventBARFDataset(EventNeRFDataset):
     def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, cached_data=None):
         super().__init__(opt, device, type=type, downscale=downscale, n_test=n_test, select_frames=select_frames, cached_data=cached_data)
         assert opt.event_only, 'only support event_only mode.'
+
+        # * generate noised poses_hf
+        if opt.noise > 0:
+            self.noise_dev = opt.noise
+            self.noised_poses_hf = self.compute_noised_poses_hf(self.noise_dev, savepath=opt.poses_hf_save_path, loadpath=opt.poses_hf_load_path)
+        else:
+            self.noise_dev, self.noised_poses_hf = None, None
 
     def collate(self, index):
         B = len(index)
@@ -66,5 +75,37 @@ class EventBARFDataset(EventNeRFDataset):
         
         return results
     
-    def get_poses_hf(self):
-        return self.poses_hf
+    def get_gt_poses_hf(self):
+        poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
+        poses_hf_dict['raw_poses_hf'] = poses_hf_dict['poses_hf']
+        return poses_hf_dict
+    
+    def get_noised_poses_hf(self):
+            return self.noised_poses_hf
+    
+    def compute_noised_poses_hf(self, noise_dev=1e-2, savepath=None, loadpath=None):
+        if loadpath is not None:
+            print(f'* load noised_poses_hf from {loadpath}...')
+            with open(loadpath, 'rb') as fin:
+                noised_poses_hf_dict = pickle.load(fin)
+        else:
+            poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
+            tss_poses_hf_ns, poses_hf = poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf']
+            se3_noise = torch.randn(len(tss_poses_hf_ns), 6) * noise_dev
+            poses_noise = lie.se3_to_SE3(se3_noise)
+            noised_poses_hf = pose.compose([poses_noise, poses_hf])
+            # * raw_poses_hf is the unchanged original data from the mocap system. poses_hf is the starting point of training.
+            noised_poses_hf_dict = {'tss_poses_hf_ns': tss_poses_hf_ns, 'poses_hf': noised_poses_hf, 'raw_poses_hf': poses_hf}
+        
+        if savepath is not None:
+            with open(savepath, 'wb') as fout:
+                pickle.dump(noised_poses_hf_dict, fout)
+
+        return noised_poses_hf_dict
+
+    @staticmethod
+    def decompose_raw_poses_hf(raw_poses_hf):
+        tss_poses_hf_ns = torch.tensor(np.stack([p["ts_ns"] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
+        poses_hf = torch.tensor(np.stack([p["pose_c2w"][:3, :] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
+        poses_hf_dict = {'tss_poses_hf_ns': tss_poses_hf_ns, 'poses_hf': poses_hf}
+        return poses_hf_dict

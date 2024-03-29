@@ -7,7 +7,7 @@ from nerf.utils import get_event_rays
 
 class BARFNetwork(torch.nn.Module):
     def __init__(self,
-                 raw_poses_hf, # a dict with keys ts_ns and pose_c2w
+                 poses_hf_dict, # a dict with keys ts_ns and pose_c2w
                  intrinsics_evs,
                  encoding="hashgrid",
                  encoding_dir="sphere_harmonics",
@@ -41,21 +41,16 @@ class BARFNetwork(torch.nn.Module):
                          **kwargs
                          )
 
-        self.se3_refine = torch.nn.Embedding(len(raw_poses_hf), 6)
-        torch.nn.init.zeros_(self.se3_refine.weight)
-
-        tss_poses_hf_ns, poses_hf = __class__.decompose_raw_poses_hf(raw_poses_hf)
+        tss_poses_hf_ns, poses_hf, raw_poses_hf = poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf'], poses_hf_dict['raw_poses_hf']
         self.register_buffer('tss_poses_hf_ns', tss_poses_hf_ns)
         self.register_buffer('poses_hf', poses_hf)
+        self.raw_poses_hf = raw_poses_hf
+
+        self.se3_refine = torch.nn.Embedding(len(self.tss_poses_hf_ns), 6)
+        torch.nn.init.zeros_(self.se3_refine.weight)
 
         self.register_buffer('intrinsics_evs', torch.tensor(intrinsics_evs, dtype=torch.float32))
         self.out_dim_color = out_dim_color
-    
-    @staticmethod
-    def decompose_raw_poses_hf(raw_poses_hf):
-        tss_poses_hf_ns = torch.tensor(np.stack([p["ts_ns"] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
-        poses_hf = torch.tensor(np.stack([p["pose_c2w"][:3, :] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
-        return tss_poses_hf_ns, poses_hf
     
     def compute_refined_poses_hf(self):
         poses_displacement = lie.se3_to_SE3(self.se3_refine.weight)
@@ -63,7 +58,7 @@ class BARFNetwork(torch.nn.Module):
         return poses_hf_ref
 
     def compute_loss(self):
-        pass
+        pass # todo
 
     @staticmethod
     def get_optimizer_and_scheduler(opt):

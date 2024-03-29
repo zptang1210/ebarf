@@ -305,6 +305,8 @@ class BARFTrainer(Trainer):
             'epoch': self.epoch,
             'global_step': self.global_step,
             'stats': self.stats,
+            'model.out_dim_color': self.model.out_dim_color,
+            'model.raw_poses_hf': self.model.raw_poses_hf
         }
 
         if self.model.nerf.cuda_ray:
@@ -395,6 +397,8 @@ class BARFTrainer(Trainer):
         self.stats = checkpoint_dict['stats']
         self.epoch = checkpoint_dict['epoch']
         self.global_step = checkpoint_dict['global_step']
+        self.model.out_dim_color = checkpoint_dict['model.out_dim_color']
+        self.model.raw_poses_hf = checkpoint_dict['model.raw_poses_hf'] # todo maybe check the poses_hf and raw_poses_hf before loading?
         self.log(f"[INFO] load at epoch {self.epoch}, global step {self.global_step}")
         
         if self.optimizer and  'optimizer' in checkpoint_dict:
@@ -430,10 +434,10 @@ class BARFTrainer(Trainer):
             poses_hf_ref = self.model.compute_refined_poses_hf().detach().cpu()
         poses_hf_dict = {'poses_hf': self.model.poses_hf.detach().cpu(),
                          'poses_hf_ref': poses_hf_ref,
+                         'raw_poses_hf': self.model.raw_poses_hf.detach().cpu(),
                          'epoch': self.epoch}
         with open(os.path.join(save_poses_hf_ref_path, f'poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
             pickle.dump(poses_hf_dict, fout)
-
 
     def eval_step_tumvie(self, data, loader):
         raise NotImplemented("we don't support evaluate the event camera's view generation.")
