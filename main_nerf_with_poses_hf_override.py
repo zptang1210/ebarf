@@ -183,6 +183,7 @@ if __name__ == '__main__':
     parser.add_argument('--error_map', action='store_true', help="use error map to sample rays")
     parser.add_argument('--clip_text', type=str, default='', help="text input for CLIP guidance")
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
+    parser.add_argument('--override_poses_hf', action='store_true', help="override the poses_hf that will be used in EBARF from poses_hf_load_path")
     parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when noise>0, load the noised poses_hf from the given path instead of getting a new randomized one.")
 
     opt = parser.parse_args()
@@ -227,10 +228,11 @@ if __name__ == '__main__':
             if opt.events:
                 # cached_data = os.path.join(trainer.workspace, 'EventNeRFDatasetCached.pickle')
                 cached_data = os.path.join('output', 'EventNeRFDatasetCached.pickle') # todo make a unique name and put it into cache folder
-                assert opt.poses_hf_load_path is not None
+                assert opt.override_poses_hf and opt.poses_hf_load_path is not None
                 with open(opt.poses_hf_load_path, 'rb') as fin:
-                    noised_posed_hf_dict = pickle.load(fin)
-                train_loader = EventNeRFDataset_with_poses_hf_override(opt, noised_posed_hf_dict, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, cached_data=cached_data).dataloader()
+                    poses_hf_dict_for_override = pickle.load(fin)
+                print('# loaded poses_hf for override: #poses_hf =', poses_hf_dict_for_override['tss_poses_hf_ns'].shape[0])
+                train_loader = EventNeRFDataset_with_poses_hf_override(opt, poses_hf_dict_for_override, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, cached_data=cached_data).dataloader()
                 valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames).dataloader()
             else:
                 train_loader = NeRFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames).dataloader()

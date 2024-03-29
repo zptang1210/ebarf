@@ -10,12 +10,20 @@ class EventBARFDataset(EventNeRFDataset):
         super().__init__(opt, device, type=type, downscale=downscale, n_test=n_test, select_frames=select_frames, cached_data=cached_data)
         assert opt.event_only, 'only support event_only mode.'
 
-        # * generate noised poses_hf
-        if opt.noise > 0:
-            self.noise_dev = opt.noise
-            self.noised_poses_hf = self.compute_noised_poses_hf(self.noise_dev, savepath=opt.poses_hf_save_path, loadpath=opt.poses_hf_load_path)
+        # * get the actual poses_hf that will be used in EBARF training
+        if opt.override_poses_hf:
+            assert opt.poses_hf_load_path is not None
+            print(f'* override poses_hf from {opt.poses_hf_load_path}...')
+            with open(opt.poses_hf_load_path, 'rb') as fin:
+                poses_hf_dict_for_override = pickle.load(fin)
+            self.poses_hf_dict_final = poses_hf_dict_for_override
         else:
-            self.noise_dev, self.noised_poses_hf = None, None
+            if opt.noise > 0:
+                print(f'* randomly generate noised poses_hf based on {opt.noise} (savepath = {opt.poses_hf_save_path})...')
+                noised_poses_hf_dict = self._compute_noised_poses_hf(opt.noise, savepath=opt.poses_hf_save_path)
+                self.poses_hf_dict_final = noised_poses_hf_dict
+            else:
+                self.poses_hf_dict_final = self.get_gt_poses_hf_dict()
 
     def collate(self, index):
         B = len(index)
@@ -41,7 +49,7 @@ class EventBARFDataset(EventNeRFDataset):
         if self.precompute_evs_poses:
             raise ValueError('precomputed_evs_poses cannot be set to True.')
         
-        poses = self.poses[index].to(self.device) # [B, 4, 4]
+        poses = self.poses[index].to(self.device) # [B, 4, 4] # * notice that self.poses are computed based on raw poses_hf.
         error_map = None if self.error_map is None else self.error_map[index]
         rays = get_rays(poses, self.intrinsics, self.H, self.W, self.num_rays, error_map)
 
@@ -75,27 +83,24 @@ class EventBARFDataset(EventNeRFDataset):
         
         return results
     
-    def get_gt_poses_hf(self):
+    def get_gt_poses_hf_dict(self):
         poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
         poses_hf_dict['raw_poses_hf'] = poses_hf_dict['poses_hf']
         return poses_hf_dict
     
-    def get_noised_poses_hf(self):
-            return self.noised_poses_hf
+    def get_final_poses_hf_dict(self, verbose=True):
+        if verbose:
+            print('* final poses_hf for training: #poses_hf =', self.poses_hf_dict_final['tss_poses_hf_ns'].shape[0])
+        return self.poses_hf_dict_final
     
-    def compute_noised_poses_hf(self, noise_dev=1e-2, savepath=None, loadpath=None):
-        if loadpath is not None:
-            print(f'* load noised_poses_hf from {loadpath}...')
-            with open(loadpath, 'rb') as fin:
-                noised_poses_hf_dict = pickle.load(fin)
-        else:
-            poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
-            tss_poses_hf_ns, poses_hf = poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf']
-            se3_noise = torch.randn(len(tss_poses_hf_ns), 6) * noise_dev
-            poses_noise = lie.se3_to_SE3(se3_noise)
-            noised_poses_hf = pose.compose([poses_noise, poses_hf])
-            # * raw_poses_hf is the unchanged original data from the mocap system. poses_hf is the starting point of training.
-            noised_poses_hf_dict = {'tss_poses_hf_ns': tss_poses_hf_ns, 'poses_hf': noised_poses_hf, 'raw_poses_hf': poses_hf}
+    def _compute_noised_poses_hf(self, noise_dev=1e-2, savepath=None):
+        poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
+        tss_poses_hf_ns, poses_hf = poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf']
+        se3_noise = torch.randn(len(tss_poses_hf_ns), 6) * noise_dev
+        poses_noise = lie.se3_to_SE3(se3_noise)
+        noised_poses_hf = pose.compose([poses_noise, poses_hf])
+        # * raw_poses_hf is the unchanged original data from the mocap system. poses_hf is the starting point of training.
+        noised_poses_hf_dict = {'tss_poses_hf_ns': tss_poses_hf_ns, 'poses_hf': noised_poses_hf, 'raw_poses_hf': poses_hf}
         
         if savepath is not None:
             with open(savepath, 'wb') as fout:

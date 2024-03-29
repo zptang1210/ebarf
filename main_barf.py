@@ -174,7 +174,8 @@ if __name__ == '__main__':
     parser.add_argument('--clip_text', type=str, default='', help="text input for CLIP guidance")
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
     parser.add_argument('--poses_hf_save_path', type=str, default=None, help="effetive only when noise>0, save the generated noised poses_hf to the given path")
-    parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when noise>0, load the noised poses_hf from the given path instead of getting a new randomized one.")
+    parser.add_argument('--override_poses_hf', action='store_true', help="override the poses_hf that will be used in EBARF from poses_hf_load_path")
+    parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when override_poses_hf is True, load the poses_hf from the given path")
 
     opt = parser.parse_args()
     assert_config(opt)
@@ -193,10 +194,7 @@ if __name__ == '__main__':
     valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()
 
     # todo: still need to deal with optimizer and model parameters.
-    if opt.noise > 0:
-        model = get_barf_model(opt, train_dataset.get_noised_poses_hf(), train_dataset.intrinsics_evs)
-    else:
-        model = get_barf_model(opt, train_dataset.get_gt_poses_hf(), train_dataset.intrinsics_evs)
+    model = get_barf_model(opt, train_dataset.get_final_poses_hf_dict(), train_dataset.intrinsics_evs)
 
     optimizer, scheduler = BARFNetwork.get_optimizer_and_scheduler(opt)
     trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)

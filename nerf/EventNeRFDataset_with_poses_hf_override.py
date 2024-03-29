@@ -354,7 +354,8 @@ class EventNeRFDataset_with_poses_hf_override(NGPDataset):
             self.rots_hf = np.stack([p["pose_c2w"][:3, :3] for p in self.poses_hf])  
             self.trans_hf = np.stack([p["pose_c2w"][:3, 3] for p in self.poses_hf])
         else:
-            print('INFO: poses_hf is override...')
+            new_poses_hf_size = poses_hf_dict_for_override['tss_poses_hf_ns'].shape[0]
+            print(f'INFO: poses_hf is overridden... (#poses_hf = {new_poses_hf_size})')
             self.tss_poses_hf_ns = poses_hf_dict_for_override['tss_poses_hf_ns'].detach().cpu().numpy()
             self.rots_hf = poses_hf_dict_for_override['poses_hf'][:, :3, :3].detach().cpu().numpy()
             self.trans_hf = poses_hf_dict_for_override['poses_hf'][:, :3, 3].detach().cpu().numpy()
