@@ -173,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--error_map', action='store_true', help="use error map to sample rays")
     parser.add_argument('--clip_text', type=str, default='', help="text input for CLIP guidance")
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
-    parser.add_argument('--poses_hf_save_path', type=str, default=None, help="effetive only when noise>0, save the generated noised poses_hf to the given path")
+    parser.add_argument('--poses_hf_save_path', type=str, default=None, help="save the poses_hf used for training to the given path")
     parser.add_argument('--override_poses_hf', action='store_true', help="override the poses_hf that will be used in EBARF from poses_hf_load_path")
     parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when override_poses_hf is True, load the poses_hf from the given path")
 

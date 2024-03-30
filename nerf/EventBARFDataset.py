@@ -16,14 +16,20 @@ class EventBARFDataset(EventNeRFDataset):
             print(f'* override poses_hf from {opt.poses_hf_load_path}...')
             with open(opt.poses_hf_load_path, 'rb') as fin:
                 poses_hf_dict_for_override = pickle.load(fin)
+            print('* comment stored in the loaded poses_hf:', poses_hf_dict_for_override['comment'])
             self.poses_hf_dict_final = poses_hf_dict_for_override
         else:
             if opt.noise > 0:
-                print(f'* randomly generate noised poses_hf based on {opt.noise} (savepath = {opt.poses_hf_save_path})...')
-                noised_poses_hf_dict = self._compute_noised_poses_hf(opt.noise, savepath=opt.poses_hf_save_path)
+                print(f'* randomly generate noised poses_hf based on {opt.noise}...')
+                noised_poses_hf_dict = self._compute_noised_poses_hf(opt.noise)
                 self.poses_hf_dict_final = noised_poses_hf_dict
             else:
                 self.poses_hf_dict_final = self.get_gt_poses_hf_dict()
+
+        if opt.poses_hf_save_path is not None:
+            print(f'* save the final poses_hf for ebarf training to {opt.poses_hf_save_path}...')
+            with open(opt.poses_hf_save_path, 'wb') as fout:
+                pickle.dump(self.poses_hf_dict_final, fout)            
 
     def collate(self, index):
         B = len(index)
@@ -84,8 +90,16 @@ class EventBARFDataset(EventNeRFDataset):
         return results
     
     def get_gt_poses_hf_dict(self):
-        poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
-        poses_hf_dict['raw_poses_hf'] = poses_hf_dict['poses_hf']
+        raw_poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
+        raw_poses_hf = raw_poses_hf_dict['raw_poses_hf']
+        raw_tss_poses_hf_ns = raw_poses_hf_dict['raw_tss_poses_hf_ns']
+        poses_hf_dict = {
+            'poses_hf': raw_poses_hf,
+            'tss_poses_hf_ns': raw_tss_poses_hf_ns,
+            'raw_poses_hf': raw_poses_hf,
+            'raw_tss_poses_hf_ns': raw_tss_poses_hf_ns,
+            'comment': 'ground truth poses_hf.'
+        }
         return poses_hf_dict
     
     def get_final_poses_hf_dict(self, verbose=True):
@@ -93,24 +107,22 @@ class EventBARFDataset(EventNeRFDataset):
             print('* final poses_hf for training: #poses_hf =', self.poses_hf_dict_final['tss_poses_hf_ns'].shape[0])
         return self.poses_hf_dict_final
     
-    def _compute_noised_poses_hf(self, noise_dev=1e-2, savepath=None):
-        poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
-        tss_poses_hf_ns, poses_hf = poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf']
-        se3_noise = torch.randn(len(tss_poses_hf_ns), 6) * noise_dev
+    def _compute_noised_poses_hf(self, noise_dev=1e-3):
+        raw_poses_hf_dict = __class__.decompose_raw_poses_hf(self.poses_hf)
+        raw_tss_poses_hf_ns, raw_poses_hf = raw_poses_hf_dict['raw_tss_poses_hf_ns'], raw_poses_hf_dict['raw_poses_hf']
+        se3_noise = torch.randn(len(raw_tss_poses_hf_ns), 6) * noise_dev
         poses_noise = lie.se3_to_SE3(se3_noise)
-        noised_poses_hf = pose.compose([poses_noise, poses_hf])
+        noised_poses_hf = pose.compose([poses_noise, raw_poses_hf])
         # * raw_poses_hf is the unchanged original data from the mocap system. poses_hf is the starting point of training.
-        noised_poses_hf_dict = {'tss_poses_hf_ns': tss_poses_hf_ns, 'poses_hf': noised_poses_hf, 'raw_poses_hf': poses_hf}
-        
-        if savepath is not None:
-            with open(savepath, 'wb') as fout:
-                pickle.dump(noised_poses_hf_dict, fout)
+        noised_poses_hf_dict = {'tss_poses_hf_ns': raw_tss_poses_hf_ns, 'poses_hf': noised_poses_hf,
+                                'raw_tss_poses_hf_ns': raw_tss_poses_hf_ns, 'raw_poses_hf': raw_poses_hf,
+                                'comment': f'add noise of {noise_dev} to the raw poses_hf.'}
 
         return noised_poses_hf_dict
 
     @staticmethod
     def decompose_raw_poses_hf(raw_poses_hf):
-        tss_poses_hf_ns = torch.tensor(np.stack([p["ts_ns"] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
-        poses_hf = torch.tensor(np.stack([p["pose_c2w"][:3, :] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
-        poses_hf_dict = {'tss_poses_hf_ns': tss_poses_hf_ns, 'poses_hf': poses_hf}
-        return poses_hf_dict
+        raw_tss_poses_hf_ns = torch.tensor(np.stack([p["ts_ns"] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
+        raw_poses_hf = torch.tensor(np.stack([p["pose_c2w"][:3, :] for p in raw_poses_hf]), dtype=torch.float32, requires_grad=False).detach()
+        raw_poses_hf_dict = {'raw_tss_poses_hf_ns': raw_tss_poses_hf_ns, 'raw_poses_hf': raw_poses_hf}
+        return raw_poses_hf_dict

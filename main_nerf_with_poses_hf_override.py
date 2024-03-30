@@ -195,6 +195,10 @@ if __name__ == '__main__':
     criterion = torch.nn.MSELoss(reduction='none')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    assert not opt.gui 
+    assert not opt.test 
+    assert opt.events
+    
     if opt.test:
         trainer = Trainer(opt.expname, opt, model, device=device, criterion=criterion, fp16=opt.fp16, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
 
@@ -231,7 +235,8 @@ if __name__ == '__main__':
                 assert opt.override_poses_hf and opt.poses_hf_load_path is not None
                 with open(opt.poses_hf_load_path, 'rb') as fin:
                     poses_hf_dict_for_override = pickle.load(fin)
-                print('# loaded poses_hf for override: #poses_hf =', poses_hf_dict_for_override['tss_poses_hf_ns'].shape[0])
+                print('* loaded poses_hf for override: #poses_hf =', poses_hf_dict_for_override['tss_poses_hf_ns'].shape[0])
+                print('* comment stored in the loaded poses_hf:', poses_hf_dict_for_override['comment'])
                 train_loader = EventNeRFDataset_with_poses_hf_override(opt, poses_hf_dict_for_override, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, cached_data=cached_data).dataloader()
                 valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames).dataloader()
             else:
@@ -241,8 +246,8 @@ if __name__ == '__main__':
             print(f"max expochs = {max_epoch}")
             trainer.train(train_loader, valid_loader, max_epoch)
 
-            # also test
-            test_loader = NeRFDataset(opt, device=device, type='test', select_frames=select_frames).dataloader()       
-            trainer.test(test_loader) # colmap doesn't have gt, so just test.
+            # # also test
+            # test_loader = NeRFDataset(opt, device=device, type='test', select_frames=select_frames).dataloader()       
+            # trainer.test(test_loader) # colmap doesn't have gt, so just test.
     
-            trainer.save_mesh(resolution=256, threshold=10)
+            # trainer.save_mesh(resolution=256, threshold=10)

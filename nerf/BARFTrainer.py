@@ -306,7 +306,8 @@ class BARFTrainer(Trainer):
             'global_step': self.global_step,
             'stats': self.stats,
             'model.out_dim_color': self.model.out_dim_color,
-            'model.raw_poses_hf': self.model.raw_poses_hf
+            'model.raw_poses_hf': self.model.raw_poses_hf,
+            'model.raw_tss_poses_hf_ns': self.model.raw_tss_poses_hf_ns
         }
 
         if self.model.nerf.cuda_ray:
@@ -398,7 +399,8 @@ class BARFTrainer(Trainer):
         self.epoch = checkpoint_dict['epoch']
         self.global_step = checkpoint_dict['global_step']
         self.model.out_dim_color = checkpoint_dict['model.out_dim_color']
-        self.model.raw_poses_hf = checkpoint_dict['model.raw_poses_hf'] # todo maybe check the poses_hf and raw_poses_hf before loading?
+        self.model.raw_poses_hf = checkpoint_dict['model.raw_poses_hf']
+        self.model.raw_tss_poses_hf_ns = checkpoint_dict['model.raw_tss_poses_hf_ns']
         self.log(f"[INFO] load at epoch {self.epoch}, global step {self.global_step}")
         
         if self.optimizer and  'optimizer' in checkpoint_dict:

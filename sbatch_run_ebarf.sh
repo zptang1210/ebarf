@@ -8,5 +8,5 @@
 module load cuda/11.4.0
 module load cudnn/cuda11-8.4.1.50
 source ~/miniconda3/etc/profile.d/conda.sh
-conda activate enerf
+conda activate ebarf
 python main_barf.py --config ./configs/mocapDesk2/mocapDesk2_ebarf.txt

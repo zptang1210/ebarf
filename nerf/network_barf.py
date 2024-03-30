@@ -41,10 +41,12 @@ class BARFNetwork(torch.nn.Module):
                          **kwargs
                          )
 
-        tss_poses_hf_ns, poses_hf, raw_poses_hf = poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf'], poses_hf_dict['raw_poses_hf']
+        tss_poses_hf_ns, poses_hf= poses_hf_dict['tss_poses_hf_ns'], poses_hf_dict['poses_hf']
+        raw_tss_poses_hf_ns, raw_poses_hf = poses_hf_dict['raw_tss_poses_hf_ns'], poses_hf_dict['raw_poses_hf']
         self.register_buffer('tss_poses_hf_ns', tss_poses_hf_ns)
         self.register_buffer('poses_hf', poses_hf)
         self.raw_poses_hf = raw_poses_hf
+        self.raw_tss_poses_hf_ns = raw_tss_poses_hf_ns
 
         self.se3_refine = torch.nn.Embedding(len(self.tss_poses_hf_ns), 6)
         torch.nn.init.zeros_(self.se3_refine.weight)

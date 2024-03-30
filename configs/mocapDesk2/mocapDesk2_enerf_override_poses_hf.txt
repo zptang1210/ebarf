@@ -1,6 +1,6 @@
 outdir = output/mocapDesk2_output/tumvie/
 datadir = data/TUMVIEDATA/mocap-desk2/
-expweek = mar-28-poses-hf-downsample-30fps
+expweek = mar-29-downsampled-poses-hf-30hz
 mode = tumvie
 lr = 0.005
 pp_poses_sphere = 0
