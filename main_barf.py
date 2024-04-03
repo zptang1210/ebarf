@@ -130,7 +130,7 @@ if __name__ == '__main__':
     parser.add_argument('--iters', type=int, default=1000000, help="training iters")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate")
-    parser.add_argument('--lr_pose', type=float, default=1e-4, help="initial learning rate for se3_refine") # todo: edit config file
+    parser.add_argument('--lr_pose', type=float, default=1e-4, help="initial learning rate for se3_refine")
     parser.add_argument('--eval_interval', type=int, default=10)
     parser.add_argument('--num_rays', type=int, default=4096, help="num rays sampled per image for each training step")
     parser.add_argument('--cuda_ray', action='store_true', help="use CUDA raymarching instead of pytorch")
@@ -193,11 +193,10 @@ if __name__ == '__main__':
 
     valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()
 
-    # todo: still need to deal with optimizer and model parameters.
     model = get_barf_model(opt, train_dataset.get_final_poses_hf_dict(), train_dataset.intrinsics_evs)
 
-    optimizer, scheduler = BARFNetwork.get_optimizer_and_scheduler(opt)
-    trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+    optimizer, scheduler, optimizer_pose, scheduler_pose = BARFNetwork.get_optimizer_and_scheduler(opt.lr, opt.lr_pose, opt.iters)
+    trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, optimizer_pose=optimizer_pose, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, lr_scheduler_pose=scheduler_pose, scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
 
     max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
     print(f"max epochs = {max_epoch}")

@@ -2,6 +2,7 @@ import os
 import glob
 import pickle
 import torch
+from torch import optim
 import tqdm
 import tensorboardX
 import cv2
@@ -14,10 +15,12 @@ class BARFTrainer(Trainer):
                  name, # name of this experiment
                  opt, # extra conf
                  model, # network 
+                 optimizer, # optimizer
+                 optimizer_pose, # optimizer for poses
+                 lr_scheduler, # scheduler
+                 lr_scheduler_pose, # scheduler for poses
                  criterion=None, # loss function, if None, assume inline implementation in train_step
-                 optimizer=None, # optimizer
                  ema_decay=None, # if use EMA, set the decay
-                 lr_scheduler=None, # scheduler
                  metrics=[], # metrics for evaluation, if None, use val_loss to measure performance, else use the first metric.
                  local_rank=0, # which GPU am I
                  world_size=1, # total num of GPUs
@@ -33,6 +36,8 @@ class BARFTrainer(Trainer):
                  scheduler_update_every_step=False, # whether to call scheduler.step() after every train step 
                  ):
         
+        self.optimizer_pose_lambdafunc = optimizer_pose
+        self.lr_scheduler_pose_lambdafunc = lr_scheduler_pose
         super().__init__(name,
                          opt,
                          model,
@@ -54,8 +59,11 @@ class BARFTrainer(Trainer):
                          use_tensorboardX=use_tensorboardX,
                          scheduler_update_every_step=scheduler_update_every_step
                          )
-        # todo might need to introduce some self.optimizer_poses code if separate optimizer are used.
-        # todo check the super class.
+        
+    def init_optimizer(self):
+        super().init_optimizer()
+        self.optimizer_pose = self.optimizer_pose_lambdafunc(self.model)
+        self.lr_scheduler_pose = self.lr_scheduler_pose_lambdafunc(self.optimizer_pose)        
     
     def __del__(self):
         super().__del__()
@@ -91,8 +99,7 @@ class BARFTrainer(Trainer):
             self.writer.close()
 
     def train_one_epoch(self, loader):
-        # todo: optimizer
-        self.log(f"==> Start Training Epoch {self.epoch}, lr={self.optimizer.param_groups[0]['lr']:.6f} ...")
+        self.log(f"==> Start Training Epoch {self.epoch}, lr={self.optimizer.param_groups[0]['lr']:.6f} lr_pose={self.optimizer_pose.param_groups[0]['lr']:.6f}...")
 
         total_loss = 0
         if self.local_rank == 0 and self.report_metric_at_train:
@@ -124,7 +131,8 @@ class BARFTrainer(Trainer):
             self.local_step += 1
             self.global_step += 1
 
-            self.optimizer.zero_grad() # todo optimizer
+            self.optimizer.zero_grad()
+            self.optimizer_pose.zero_grad()
 
             with torch.cuda.amp.autocast(enabled=self.fp16):
                 if self.use_events:
@@ -134,11 +142,13 @@ class BARFTrainer(Trainer):
                     # preds, truths, loss = self.train_step(data)
          
             self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer) # todo optimizer
+            self.scaler.step(self.optimizer)
+            self.scaler.step(self.optimizer_pose)
             self.scaler.update()
 
-            if self.scheduler_update_every_step: # todo scheduler
+            if self.scheduler_update_every_step:
                 self.lr_scheduler.step()
+                self.lr_scheduler_pose.step()
 
             loss_val = loss.item()
             total_loss += loss_val
@@ -160,7 +170,8 @@ class BARFTrainer(Trainer):
                         if not self.event_only:
                             raise NotImplementedError('only support event_only=True')
                             # self.writer.add_scalar("train/loss_frames", losses_indiv["loss_frames"].item(), self.global_step)
-                    self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step) # todo
+                    self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
+                    self.writer.add_scalar("train/lr_pose", self.optimizer_pose.param_groups[0]['lr'], self.global_step)
                     if self.log_implicit_C_thres and self.use_events:
                         self.writer.add_scalar("train/est_C_med_on", est_C_thres["median_on"], self.global_step)
                         self.writer.add_scalar("train/est_C_med_off", est_C_thres["median_off"], self.global_step)
@@ -168,7 +179,7 @@ class BARFTrainer(Trainer):
                         self.writer.add_scalar("train/est_C_med_off_sign", est_C_thres["median_off_sign"], self.global_step)
 
                 if self.scheduler_update_every_step:
-                    pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f}), lr={self.optimizer.param_groups[0]['lr']:.6f}")
+                    pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f}), lr={self.optimizer.param_groups[0]['lr']:.6f} lr_pose={self.optimizer_pose.param_groups[0]['lr']:.6f}")
                     # self.log(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f}), lr={self.optimizer.param_groups[0]['lr']:.6f}")
                 else:
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
@@ -201,6 +212,11 @@ class BARFTrainer(Trainer):
                 self.lr_scheduler.step(average_loss)
             else:
                 self.lr_scheduler.step()
+
+            if isinstance(self.lr_scheduler_pose, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.lr_scheduler_pose.step(average_loss)
+            else:
+                self.lr_scheduler_pose.step()
 
         self.log(f"==> Finished Epoch {self.epoch}.")
 
@@ -315,8 +331,10 @@ class BARFTrainer(Trainer):
             state['mean_density'] = self.model.nerf.mean_density
 
         if full:
-            state['optimizer'] = self.optimizer.state_dict() # todo
+            state['optimizer'] = self.optimizer.state_dict()
             state['lr_scheduler'] = self.lr_scheduler.state_dict()
+            state['optimizer_pose'] = self.optimizer_pose.state_dict()
+            state['lr_scheduler_pose'] = self.lr_scheduler_pose.state_dict()
             state['scaler'] = self.scaler.state_dict()
             if self.ema is not None:
                 state['ema'] = self.ema.state_dict()
@@ -416,6 +434,20 @@ class BARFTrainer(Trainer):
                 self.log("[INFO] loaded scheduler.")
             except:
                 self.log("[WARN] Failed to load scheduler.")
+
+        if self.optimizer_pose and  'optimizer_pose' in checkpoint_dict:
+            try:
+                self.optimizer_pose.load_state_dict(checkpoint_dict['optimizer_pose'])
+                self.log("[INFO] loaded optimizer_pose.")
+            except:
+                self.log("[WARN] Failed to load optimizer_pose.")
+        
+        if self.lr_scheduler_pose and 'lr_scheduler_pose' in checkpoint_dict:
+            try:
+                self.lr_scheduler_pose.load_state_dict(checkpoint_dict['lr_scheduler_pose'])
+                self.log("[INFO] loaded scheduler_poses.")
+            except:
+                self.log("[WARN] Failed to load scheduler_poses.")
         
         if self.scaler and 'scaler' in checkpoint_dict:
             try:
@@ -436,7 +468,9 @@ class BARFTrainer(Trainer):
             poses_hf_ref = self.model.compute_refined_poses_hf().detach().cpu()
         poses_hf_dict = {'poses_hf': self.model.poses_hf.detach().cpu(),
                          'poses_hf_ref': poses_hf_ref,
+                         'tss_poses_hf_ns': self.model.tss_poses_hf_ns.detach().cpu(),
                          'raw_poses_hf': self.model.raw_poses_hf.detach().cpu(),
+                         'raw_tss_poses_hf_ns': self.model.raw_tss_poses_hf_ns.detach().cpu(),
                          'epoch': self.epoch}
         with open(os.path.join(save_poses_hf_ref_path, f'poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
             pickle.dump(poses_hf_dict, fout)

@@ -369,15 +369,9 @@ class Trainer(object):
             criterion.to(self.device)
         self.criterion = criterion
 
-        if optimizer is None:
-            self.optimizer = optim.Adam(self.model.parameters(), lr=0.001, weight_decay=5e-4) # naive adam
-        else:
-            self.optimizer = optimizer(self.model)
-
-        if lr_scheduler is None:
-            self.lr_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda epoch: 1) # fake scheduler
-        else:
-            self.lr_scheduler = lr_scheduler(self.optimizer)
+        self.optimizer_lambdafunc = optimizer
+        self.lr_scheduler_lambdafunc = lr_scheduler
+        self.init_optimizer() # * this change is for the extra optimizer_pose and lr_scheduler_pose in BARF
 
         if ema_decay is not None:
             self.ema = ExponentialMovingAverage(self.model.parameters(), decay=ema_decay)
@@ -475,6 +469,18 @@ class Trainer(object):
             else: # path to ckpt
                 self.log(f"[INFO] Loading {self.use_checkpoint} ...")
                 self.load_checkpoint(self.use_checkpoint)
+
+    def init_optimizer(self):
+        if self.optimizer_lambdafunc is None:
+            self.optimizer = optim.Adam(self.model.parameters(), lr=0.001, weight_decay=5e-4) # naive adam
+        else:
+            self.optimizer = self.optimizer_lambdafunc(self.model)
+
+        if self.lr_scheduler_lambdafunc is None:
+            # BUG: what if the type of lr_scheduler is not the same as the one in the checkpoint
+            self.lr_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda epoch: 1) # fake scheduler
+        else:
+            self.lr_scheduler = self.lr_scheduler_lambdafunc(self.optimizer)
 
     def __del__(self):
         if self.log_ptr: 

@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 from .pose_utils.camera import lie, pose
 from .pose_utils.pose_interpolator import PoseInterpolator
@@ -59,24 +58,23 @@ class BARFNetwork(torch.nn.Module):
         poses_hf_ref = pose.compose([poses_displacement, self.poses_hf])
         return poses_hf_ref
 
-    def compute_loss(self):
-        pass # todo
-
     @staticmethod
-    def get_optimizer_and_scheduler(opt):
+    def get_optimizer_and_scheduler(lr, lr_pose, iters):
         # todo separate the two optimizers later, try the simplest implementation first
-        # optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(opt.lr), betas=(0.9, 0.99), eps=1e-15)
-        # scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
+        optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(lr), betas=(0.9, 0.99), eps=1e-15)
+        scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
 
-        # optimizer_pose = lambda model: torch.optim.Adam(model.se3_refine.parameters(), lr=opt.lr_pose) # todo add lr_pose=3.e-3
-        # scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.ExponentialLR(optimizer, 
-        #                                 gamma=(opt.lr_pose_end/opt.lr_pose)**(1./opt.iters)) # todo add lr_pose_end=1.e-5
+        optimizer_pose = lambda model: torch.optim.Adam(model.se3_refine.parameters(), lr=lr_pose)
+        scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
+        # scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.ExponentialLR(optimizer_pose, 
+        #                                 gamma=(opt.lr_pose_end/opt.lr_pose)**(1./opt.iters)) # todo scheduler used in BARF, tried later.
         
-        optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(opt.lr) + [{'params': model.se3_refine.parameters(), 'lr': opt.lr_pose}],
-                                                   betas=(0.9, 0.99), eps=1e-15)
-        scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
 
-        return optimizer, scheduler
+        # optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(lr) + [{'params': model.se3_refine.parameters(), 'lr': lr_pose}],
+        #                                            betas=(0.9, 0.99), eps=1e-15)
+        # scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
+
+        return optimizer, scheduler, optimizer_pose, scheduler_pose
 
 
     def forward(self, data):
