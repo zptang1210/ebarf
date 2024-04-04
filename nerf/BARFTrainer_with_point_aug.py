@@ -128,6 +128,9 @@ class BARFTrainer_with_point_aug(BARFTrainer):
         self.error_map = train_loader._data.error_map
         assert self.error_map is None, 'error_map is not supported yet.'
 
+        # * get a ref to evs_timespan_us
+        self.evs_timespan_us = train_loader._data.evs_timespan_us
+
         for epoch in range(self.epoch, max_epochs + 1):
             self.epoch = epoch
 
@@ -145,7 +148,7 @@ class BARFTrainer_with_point_aug(BARFTrainer):
 
                 # record the model and do evaluation before augmentation
                 print(f'[AUG_INFO] Evaluate before augmentation {num_stuck_times}...')
-                name = f'last_epoch_before_aug_{num_stuck_times}'
+                name = f'last_epoch_{self.epoch:08d}_before_aug_{num_stuck_times}'
                 self.save_checkpoint(full=True, best=False, remove_old=False, name=name)
                 self.evaluate_one_epoch(valid_loader, name=name)
 

@@ -118,17 +118,19 @@ def _load_event_data_tumvie_from_cache(path, idxs, hotpixs=False, H=720, W=1280,
         coords = cache['coords']
         rectify_map = cache['rectify_map']
         tss_evs_centers_us = cache['tss_evs_centers_us']
+        evs_timespan_us = cache['evs_timespan_us']
     else:
-        evs_out, hists, coords, rectify_map, tss_evs_centers_us = _load_event_data_tumvie(path, idxs, hotpixs=hotpixs, H=H, W=W, img_folder=img_folder)
+        evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us = _load_event_data_tumvie(path, idxs, hotpixs=hotpixs, H=H, W=W, img_folder=img_folder)
         with open(cache_path, 'wb') as fout:
             cache = {'evs_out': evs_out,
                      'hists': hists,
                      'coords': coords,
                      'rectify_map': rectify_map,
-                     'tss_evs_centers_us': tss_evs_centers_us}
+                     'tss_evs_centers_us': tss_evs_centers_us,
+                     'evs_timespan_us': evs_timespan_us}
             pickle.dump(cache, fout)
 
-    return evs_out, hists, coords, rectify_map, tss_evs_centers_us
+    return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
 def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder="left_images"):
     idxss = sorted(idxs)
@@ -178,9 +180,11 @@ def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder
             \nUsing dT_us={dT_us*1e-3:.3f}ms since requested ev-window is {ev_window_dT_us*1e-6:.3f}secs long \
             but can use maximum of max_dT {max_dT_us*1e-6:.3f}secs.")
 
+    evs_timespan_us = np.zeros((tss_imgs_us.shape[0], 2))
     for i, ts_us in enumerate(tss_imgs_us):
         start_time_us = tss_evs_centers_us[i] + dT_us
         end_time_us = tss_evs_centers_us[i+1] - dT_us
+        evs_timespan_us[i, 0], evs_timespan_us[i, 1] = start_time_us, end_time_us
 
         durs_ms.append(end_time_us/1e3-start_time_us/1e3)
         ev_batch = event_slicer.get_events(start_time_us, end_time_us)
@@ -227,7 +231,7 @@ def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder
     print(f"Duration (ms) expected vs. measured: {np.abs(np.asarray(durs_ms).sum() - (tss_imgs_us[-1]-tss_imgs_us[0])/1e3 - 100)} ms")
     print(f"Got total events of {np.asarray(durs_ms).sum()}ms, with pos/neg = {posneg}")
     
-    return evs_out, hists, coords, rectify_map, tss_evs_centers_us
+    return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
 load_event_data_tumvie = _load_event_data_tumvie_from_cache
 
@@ -530,18 +534,20 @@ class EventNeRFDataset(NGPDataset):
             img_folder = "images" # use non-blurred images for eval
         
         rectify_map = np.stack(np.meshgrid(np.arange(self.W_ev), np.arange(self.H_ev)), axis=2)
+        evs_timespan_us = None
         if mode == "esim":
             evs_batches_ns = load_event_data_esim(path, idxs, hwf=hwf, img_folder=img_folder)
             tss_centers_us = [1e-3*(evs[0, 2]) for evs in evs_batches_ns]
             tss_centers_us.append(evs_batches_ns[-1][-1, 2]*1e-3)
             coords = [cs[:, :2] for cs in evs_batches_ns]
         elif mode == "tumvie":
-            evs_batches_ns, hists, coords, rectify_map, tss_centers_us = load_event_data_tumvie(path, idxs, self.hotpixs, self.H_ev, self.W_ev, img_folder=self.imgdir)
-        elif mode == "eds":
+            evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_tumvie(path, idxs, self.hotpixs, self.H_ev, self.W_ev, img_folder=self.imgdir)
+        elif mode == "eds": # todo add evs_timespan_us for EDS and ESIM.
             evs_batches_ns, hists, coords, rectify_map, tss_centers_us = load_event_data_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev)
         else: 
             sys.exit()
         self.rectify_map = rectify_map
+        self.evs_timespan_us = evs_timespan_us
 
         # Compute no_events per event-batch: locations and respective time interval (t0,t1)
         no_evs_out = None

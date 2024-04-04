@@ -69,9 +69,35 @@ class BARFTrainer(Trainer):
         super().__del__()
 
     def train(self, train_loader, valid_loader, max_epochs):
-        assert not self.model.nerf.cuda_ray, 'cuda_ray not supported yet.'
-        assert train_loader._data.error_map is None, 'error_map is not supported yet.'
-        super().train(train_loader, valid_loader, max_epochs)
+        if self.use_tensorboardX and self.local_rank == 0:
+            self.writer = tensorboardX.SummaryWriter(os.path.join(self.workspace, "run", self.name))
+
+        # mark untrained region (i.e., not covered by any camera from the training dataset)
+        if self.model.nerf.cuda_ray:
+            raise NotImplementedError('cuda_ray not supported yet.')
+            # self.model.mark_untrained_grid(train_loader._data.poses, train_loader._data.intrinsics)
+        
+        self.error_map = train_loader._data.error_map
+        assert self.error_map is None, 'error_map is not supported yet.'
+
+        # * get a ref to evs_timespan_us
+        self.evs_timespan_us = train_loader._data.evs_timespan_us
+
+        for epoch in range(self.epoch, max_epochs + 1):
+            self.epoch = epoch
+
+            self.train_one_epoch(train_loader)
+
+            if self.workspace is not None and self.local_rank == 0:
+                self.save_checkpoint(full=True, best=False)
+
+
+            if self.epoch % self.eval_interval == 0:
+                self.evaluate_one_epoch(valid_loader)
+                self.save_checkpoint(full=False, best=True)
+
+        if self.use_tensorboardX and self.local_rank == 0:
+            self.writer.close()
 
     def train_one_epoch(self, loader):
         self.log(f"==> Start Training Epoch {self.epoch}, lr={self.optimizer.param_groups[0]['lr']:.6f} lr_pose={self.optimizer_pose.param_groups[0]['lr']:.6f}...")
@@ -437,11 +463,13 @@ class BARFTrainer(Trainer):
         os.makedirs(save_poses_hf_ref_path, exist_ok=True)
         with torch.no_grad():
             poses_hf_ref = self.model.compute_refined_poses_hf().detach().cpu()
+        evs_timespan_us = self.evs_timespan_us if hasattr(self, 'evs_timespan_us') else None
         poses_hf_dict = {'poses_hf': self.model.poses_hf.detach().cpu(),
                          'poses_hf_ref': poses_hf_ref,
                          'tss_poses_hf_ns': self.model.tss_poses_hf_ns.detach().cpu(),
                          'raw_poses_hf': self.model.raw_poses_hf.detach().cpu(),
                          'raw_tss_poses_hf_ns': self.model.raw_tss_poses_hf_ns.detach().cpu(),
+                         'evs_timespan_us': evs_timespan_us,
                          'epoch': self.epoch}
         prefix = '' if name is None else name+'_'
         with open(os.path.join(save_poses_hf_ref_path, f'{prefix}poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
