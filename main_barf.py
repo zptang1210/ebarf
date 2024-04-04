@@ -1,16 +1,13 @@
-from re import A
 import torch
 import configargparse
 import numpy as np
 
-from nerf.provider import NeRFDataset, EventNeRFDataset, EventBARFDataset
-from nerf.gui import NeRFGUI
+from nerf.provider import NeRFDataset, EventBARFDataset
 from nerf.utils import *
-from nerf.BARFTrainer import *
+from nerf.BARFTrainer import BARFTrainer
+from nerf.BARFTrainer_with_point_aug import BARFTrainer_with_point_aug
 from nerf.network_barf import BARFNetwork
 
-from functools import partial
-from loss import huber_loss
 # [debug] enable for debugging (slow!)
 # torch.autograd.set_detect_anomaly(True)
 
@@ -127,7 +124,7 @@ if __name__ == '__main__':
     parser.add_argument('--noise', type=float, default=0., help="the degree of noise added to ground truth mocap data for event poses interpolation.")
      
     ### training options
-    parser.add_argument('--iters', type=int, default=1000000, help="training iters")
+    parser.add_argument('--iters', type=int, default=120000, help="training iters")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate")
     parser.add_argument('--lr_pose', type=float, default=1e-4, help="initial learning rate for se3_refine")
@@ -173,9 +170,14 @@ if __name__ == '__main__':
     parser.add_argument('--error_map', action='store_true', help="use error map to sample rays")
     parser.add_argument('--clip_text', type=str, default='', help="text input for CLIP guidance")
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
-    parser.add_argument('--poses_hf_save_path', type=str, default=None, help="save the poses_hf used for training to the given path")
+    parser.add_argument('--poses_hf_save_path', type=str, default=None, help="save to the given path the poses_hf used for training")
     parser.add_argument('--override_poses_hf', action='store_true', help="override the poses_hf that will be used in EBARF from poses_hf_load_path")
     parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when override_poses_hf is True, load the poses_hf from the given path")
+    
+    ### point augmentation
+    parser.add_argument('--aug', action='store_true', help='do point augmentation.')
+    parser.add_argument('--max_pt_aug_times', type=int, default=0, help="effective only when aug=True. max number of times to do point augmentation")
+    parser.add_argument('--aug_patience', type=int, default=500, help="effective only when aug=True. the degree of patience when the loss gets stuck on a plateau before we process point augmentation")
 
     opt = parser.parse_args()
     assert_config(opt)
@@ -195,8 +197,16 @@ if __name__ == '__main__':
 
     model = get_barf_model(opt, train_dataset.get_final_poses_hf_dict(), train_dataset.intrinsics_evs)
 
-    optimizer, scheduler, optimizer_pose, scheduler_pose = BARFNetwork.get_optimizer_and_scheduler(opt.lr, opt.lr_pose, opt.iters)
-    trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, optimizer_pose=optimizer_pose, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, lr_scheduler_pose=scheduler_pose, scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+    optimizer, scheduler, optimizer_pose, scheduler_pose = model.get_optimizer_and_scheduler(opt.lr, opt.lr_pose, opt.iters)
+    if opt.aug:
+        print(f"[AUG_INFO] Enabled point augmentation: max_pt_aug_times = {opt.max_pt_aug_times}, patience = {opt.aug_patience}")
+        trainer = BARFTrainer_with_point_aug(opt.expname, opt, model, opt.max_pt_aug_times, device=device, optimizer=optimizer, optimizer_pose=optimizer_pose,
+                                             criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, lr_scheduler_pose=scheduler_pose,
+                                             scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+    else:
+        trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, optimizer_pose=optimizer_pose,
+                              criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, lr_scheduler_pose=scheduler_pose,
+                              scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
 
     max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
     print(f"max epochs = {max_epoch}")

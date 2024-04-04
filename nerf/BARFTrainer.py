@@ -69,34 +69,9 @@ class BARFTrainer(Trainer):
         super().__del__()
 
     def train(self, train_loader, valid_loader, max_epochs):
-        if self.use_tensorboardX and self.local_rank == 0:
-            self.writer = tensorboardX.SummaryWriter(os.path.join(self.workspace, "run", self.name))
-
-        # mark untrained region (i.e., not covered by any camera from the training dataset)
-        if self.model.nerf.cuda_ray:
-            raise NotImplementedError('cuda_ray not supported yet.')
-            # self.model.mark_untrained_grid(train_loader._data.poses, train_loader._data.intrinsics)
-        
-        self.error_map = train_loader._data.error_map
-        assert self.error_map is None, 'error_map is not supported yet.'
-
-        dt_eps = 0
-        dt_logeps = 0
-        for epoch in range(self.epoch, max_epochs + 1):
-            self.epoch = epoch
-
-            self.train_one_epoch(train_loader)
-
-            if self.workspace is not None and self.local_rank == 0:
-                self.save_checkpoint(full=True, best=False)
-
-
-            if self.epoch % self.eval_interval == 0:
-                self.evaluate_one_epoch(valid_loader)
-                self.save_checkpoint(full=False, best=True)
-
-        if self.use_tensorboardX and self.local_rank == 0:
-            self.writer.close()
+        assert not self.model.nerf.cuda_ray, 'cuda_ray not supported yet.'
+        assert train_loader._data.error_map is None, 'error_map is not supported yet.'
+        super().train(train_loader, valid_loader, max_epochs)
 
     def train_one_epoch(self, loader):
         self.log(f"==> Start Training Epoch {self.epoch}, lr={self.optimizer.param_groups[0]['lr']:.6f} lr_pose={self.optimizer_pose.param_groups[0]['lr']:.6f}...")
@@ -117,10 +92,6 @@ class BARFTrainer(Trainer):
             pbar = tqdm.tqdm(total=len(loader) * loader.batch_size, bar_format='{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
         self.local_step = 0
-
-        dtlog_steps = 0
-        dtsteps, dtloadall, dtloaddisk, dtinterpols, dtrays, dtimgs, dtbundle = 0, 0, 0, 0, 0, 0, 0
-
         for data in loader:
             # update grid every 16 steps
             if self.model.nerf.cuda_ray and self.global_step % 16 == 0:
@@ -159,7 +130,6 @@ class BARFTrainer(Trainer):
                         metric.update(preds, truths)
                         
                 if self.use_tensorboardX:
-                    # raise NotImplementedError('tensorboard not supported yet.')
                     self.writer.add_scalar("train/loss", loss_val, self.global_step)
                     self.writer.add_scalar("train/epoch", self.epoch, self.global_step)
                     if self.use_events:
@@ -218,7 +188,8 @@ class BARFTrainer(Trainer):
             else:
                 self.lr_scheduler_pose.step()
 
-        self.log(f"==> Finished Epoch {self.epoch}.")
+        self.log(f"==> Finished Epoch {self.epoch}. Average loss = {average_loss}")
+        return average_loss
 
     def train_step_events(self, data):
         loss_evs, loss_no_evs, loss_frames = -1,-1,-1  # init for logging
@@ -472,7 +443,8 @@ class BARFTrainer(Trainer):
                          'raw_poses_hf': self.model.raw_poses_hf.detach().cpu(),
                          'raw_tss_poses_hf_ns': self.model.raw_tss_poses_hf_ns.detach().cpu(),
                          'epoch': self.epoch}
-        with open(os.path.join(save_poses_hf_ref_path, f'poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
+        prefix = '' if name is None else name+'_'
+        with open(os.path.join(save_poses_hf_ref_path, f'{prefix}poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
             pickle.dump(poses_hf_dict, fout)
 
     def eval_step_tumvie(self, data, loader):

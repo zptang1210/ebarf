@@ -178,7 +178,16 @@ class NeRFRenderer(nn.Module):
         fars.unsqueeze_(-1)
 
         if self.DEBUG:
-            assert torch.allclose(nears, nears_) and torch.allclose(fars, fars_)
+            print('nears', nears, nears.shape)
+            print('nears_', nears_, nears_.shape)
+            print('fars', fars, fars.shape)
+            print('fars_', fars_, fars_.shape)
+            for i in range(nears.shape[0]):
+                print (i, ':')
+                print('near', nears[i], nears_[i])
+                print('far', fars[i], fars_[i])
+                assert torch.isclose(nears[i], nears_[i])
+                assert torch.isclose(fars[i], fars_[i])
 
         #print(f'nears = {nears.min().item()} ~ {nears.max().item()}, fars = {fars.min().item()} ~ {fars.max().item()}')
 

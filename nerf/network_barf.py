@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from .pose_utils.camera import lie, pose
 from .pose_utils.pose_interpolator import PoseInterpolator
@@ -50,7 +51,8 @@ class BARFNetwork(torch.nn.Module):
         self.se3_refine = torch.nn.Embedding(len(self.tss_poses_hf_ns), 6)
         torch.nn.init.zeros_(self.se3_refine.weight)
 
-        self.register_buffer('intrinsics_evs', torch.tensor(intrinsics_evs, dtype=torch.float32))
+        if isinstance(intrinsics_evs, np.ndarray): intrinsics_evs = torch.from_numpy(intrinsics_evs)
+        self.register_buffer('intrinsics_evs', intrinsics_evs)
         self.out_dim_color = out_dim_color
     
     def compute_refined_poses_hf(self):
@@ -60,19 +62,12 @@ class BARFNetwork(torch.nn.Module):
 
     @staticmethod
     def get_optimizer_and_scheduler(lr, lr_pose, iters):
-        # todo separate the two optimizers later, try the simplest implementation first
         optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(lr), betas=(0.9, 0.99), eps=1e-15)
         scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
 
+        # todo try various methods
         optimizer_pose = lambda model: torch.optim.Adam(model.se3_refine.parameters(), lr=lr_pose)
         scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
-        # scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.ExponentialLR(optimizer_pose, 
-        #                                 gamma=(opt.lr_pose_end/opt.lr_pose)**(1./opt.iters)) # todo scheduler used in BARF, tried later.
-        
-
-        # optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(lr) + [{'params': model.se3_refine.parameters(), 'lr': lr_pose}],
-        #                                            betas=(0.9, 0.99), eps=1e-15)
-        # scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
 
         return optimizer, scheduler, optimizer_pose, scheduler_pose
 

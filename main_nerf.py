@@ -136,7 +136,7 @@ if __name__ == '__main__':
     parser.add_argument('--precompute_evs_poses', type=int, default=1, help="preloading poses for each event (much faster, but larger memory required)")
      
     ### training options
-    parser.add_argument('--iters', type=int, default=1000000, help="training iters")
+    parser.add_argument('--iters', type=int, default=120000, help="training iters")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate") 
     parser.add_argument('--eval_interval', type=int, default=10)
