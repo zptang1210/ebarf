@@ -10,12 +10,12 @@ class BARFNetwork_with_point_aug(BARFNetwork):
         self.nerf = barf_net.nerf
         self.raw_tss_poses_hf_ns, self.raw_poses_hf = barf_net.raw_tss_poses_hf_ns, barf_net.raw_poses_hf
         
-        aug_tss_poses_hf_ns, aug_poses_hf, aug_se3_refine_weight = __class__.augmentPoint(barf_net)
+        aug_tss_poses_hf_ns, aug_poses_hf = __class__.augmentPoint(barf_net)
         self.register_buffer('tss_poses_hf_ns', aug_tss_poses_hf_ns)
         self.register_buffer('poses_hf', aug_poses_hf)
 
         self.se3_refine = torch.nn.Embedding(len(self.tss_poses_hf_ns), 6)
-        self.se3_refine.weight.data = aug_se3_refine_weight
+        torch.nn.init.zeros_(self.se3_refine.weight)
 
         self.register_buffer('intrinsics_evs', barf_net.intrinsics_evs)
         self.out_dim_color = barf_net.out_dim_color
@@ -23,7 +23,6 @@ class BARFNetwork_with_point_aug(BARFNetwork):
     @torch.no_grad()
     def augmentPoint(barf_net):
         tss_poses_hf_ns = barf_net.tss_poses_hf_ns.detach().clone()
-        se3_refine_weight = barf_net.se3_refine.weight.data.detach().clone()
         with torch.no_grad():
             poses_hf_ref = barf_net.compute_refined_poses_hf().detach().clone()
 
@@ -39,7 +38,4 @@ class BARFNetwork_with_point_aug(BARFNetwork):
         aug_poses_hf[::2, :, :] = poses_hf_ref
         aug_poses_hf[1::2, :, :] = middle_poses
 
-        aug_se3_refine_weight = torch.zeros((aug_point_num, 6), dtype=se3_refine_weight.dtype)
-        aug_se3_refine_weight[::2, :] = se3_refine_weight
-
-        return aug_tss_poses_hf_ns, aug_poses_hf, aug_se3_refine_weight
+        return aug_tss_poses_hf_ns, aug_poses_hf
