@@ -197,16 +197,17 @@ if __name__ == '__main__':
 
     model = get_barf_model(opt, train_dataset.get_final_poses_hf_dict(), train_dataset.intrinsics_evs)
 
-    optimizer, scheduler, optimizer_pose, scheduler_pose = model.get_optimizer_and_scheduler(opt.lr, opt.lr_pose, opt.iters)
     if opt.aug:
         print(f"[AUG_INFO] Enabled point augmentation: max_pt_aug_times = {opt.max_pt_aug_times}, patience = {opt.aug_patience}")
+        optimizer, scheduler, optimizer_pose, scheduler_pose, scheduler_update_every_step, scheduler_pose_update_every_step = BARFTrainer_with_point_aug.get_optimizer_and_scheduler(opt.lr, opt.lr_pose, opt.iters, opt)
         trainer = BARFTrainer_with_point_aug(opt.expname, opt, model, opt.max_pt_aug_times, device=device, optimizer=optimizer, optimizer_pose=optimizer_pose,
                                              criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, lr_scheduler_pose=scheduler_pose,
-                                             scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+                                             scheduler_update_every_step=scheduler_update_every_step, scheduler_pose_update_every_step=scheduler_pose_update_every_step, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
     else:
+        optimizer, scheduler, optimizer_pose, scheduler_pose, scheduler_update_every_step, scheduler_pose_update_every_step = BARFTrainer.get_optimizer_and_scheduler(opt.lr, opt.lr_pose, opt.iters, opt)
         trainer = BARFTrainer(opt.expname, opt, model, device=device, optimizer=optimizer, optimizer_pose=optimizer_pose,
                               criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, lr_scheduler_pose=scheduler_pose,
-                              scheduler_update_every_step=True, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+                              scheduler_update_every_step=scheduler_update_every_step, scheduler_pose_update_every_step=scheduler_pose_update_every_step, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
 
     max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
     print(f"max epochs = {max_epoch}")

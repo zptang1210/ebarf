@@ -33,11 +33,13 @@ class BARFTrainer(Trainer):
                  report_metric_at_train=False, # also report metrics at training
                  use_checkpoint="latest", # which ckpt to use at init time
                  use_tensorboardX=True, # whether to use tensorboard for logging
-                 scheduler_update_every_step=False, # whether to call scheduler.step() after every train step 
+                 scheduler_update_every_step=True, # whether to call scheduler.step() after every train step 
+                 scheduler_pose_update_every_step=True # whether to call scheduler_pose.step() after every train step 
                  ):
         
         self.optimizer_pose_lambdafunc = optimizer_pose
         self.lr_scheduler_pose_lambdafunc = lr_scheduler_pose
+        self.scheduler_pose_update_every_step = scheduler_pose_update_every_step
         super().__init__(name,
                          opt,
                          model,
@@ -145,6 +147,7 @@ class BARFTrainer(Trainer):
 
             if self.scheduler_update_every_step:
                 self.lr_scheduler.step()
+            if self.scheduler_pose_update_every_step:
                 self.lr_scheduler_pose.step()
 
             loss_val = loss.item()
@@ -174,12 +177,13 @@ class BARFTrainer(Trainer):
                         self.writer.add_scalar("train/est_C_med_on_sign", est_C_thres["median_on_sign"], self.global_step)
                         self.writer.add_scalar("train/est_C_med_off_sign", est_C_thres["median_off_sign"], self.global_step)
 
+                desc = f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})"
                 if self.scheduler_update_every_step:
-                    pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f}), lr={self.optimizer.param_groups[0]['lr']:.6f} lr_pose={self.optimizer_pose.param_groups[0]['lr']:.6f}")
-                    # self.log(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f}), lr={self.optimizer.param_groups[0]['lr']:.6f}")
-                else:
-                    pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
-                    # self.log(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
+                    desc += f", lr={self.optimizer.param_groups[0]['lr']:.6f}"
+                if self.scheduler_pose_update_every_step:
+                    desc += f", lr_pose={self.optimizer_pose.param_groups[0]['lr']:.6f}"
+                pbar.set_description(desc)
+                # self.log(desc)
                 pbar.update(loader.batch_size)
 
                 if self.epoch <= self.eval_interval:
@@ -209,6 +213,7 @@ class BARFTrainer(Trainer):
             else:
                 self.lr_scheduler.step()
 
+        if not self.scheduler_pose_update_every_step:
             if isinstance(self.lr_scheduler_pose, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 self.lr_scheduler_pose.step(average_loss)
             else:
@@ -504,6 +509,27 @@ class BARFTrainer(Trainer):
         loss = self.criterion(pred_rgb, gt_rgb).mean()
 
         return pred_rgb, pred_depth, gt_rgb, loss
+    
+    @classmethod
+    def get_optimizer_and_scheduler(cls, lr, lr_pose, total_iters, opt):
+        optimizer, scheduler = cls._get_optimizer_and_scheduler_for_nerf(lr, total_iters)
+        optimizer_pose, scheduler_pose = cls._get_optimizer_and_scheduler_for_pose(lr_pose, total_iters)
+        scheduler_update_every_step, scheduler_pose_update_every_step = True, True
+        return optimizer, scheduler, optimizer_pose, scheduler_pose, scheduler_update_every_step, scheduler_pose_update_every_step
+    
+    @classmethod
+    def _get_optimizer_and_scheduler_for_nerf(cls, lr, total_iters):
+        optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(lr), betas=(0.9, 0.99), eps=1e-15)
+        scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / total_iters, 1))
+        return optimizer, scheduler
+    
+    @classmethod
+    def _get_optimizer_and_lambda_lr_scheduler_for_pose(cls, lr_pose, total_iters):
+        optimizer_pose = lambda model: torch.optim.Adam(model.se3_refine.parameters(), lr=lr_pose)
+        scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / total_iters, 1))
+        return optimizer_pose, scheduler_pose
+
+    _get_optimizer_and_scheduler_for_pose = _get_optimizer_and_lambda_lr_scheduler_for_pose
 
     # todo
     def test(self, loader, save_path=None, name=None):

@@ -85,7 +85,8 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                  report_metric_at_train=False, # also report metrics at training
                  use_checkpoint="latest", # which ckpt to use at init time
                  use_tensorboardX=True, # whether to use tensorboard for logging
-                 scheduler_update_every_step=False, # whether to call scheduler.step() after every train step 
+                 scheduler_update_every_step=True, # whether to call scheduler.step() after every train step 
+                 scheduler_pose_update_every_step=False # whether to call scheduler_pose.step() after every train step 
                  ):
         self.max_pt_aug_times = max_pt_aug_times
         self.check_loss_on_plateau = CheckLossOnPlateau(max_pt_aug_times)        
@@ -110,7 +111,8 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                          report_metric_at_train=report_metric_at_train,
                          use_checkpoint=use_checkpoint,
                          use_tensorboardX=use_tensorboardX,
-                         scheduler_update_every_step=scheduler_update_every_step
+                         scheduler_update_every_step=scheduler_update_every_step,
+                         scheduler_pose_update_every_step=scheduler_pose_update_every_step
                          )
         
     def __del__(self):
@@ -168,12 +170,11 @@ class BARFTrainer_with_point_aug(BARFTrainer):
             new_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(new_model)
             new_model = torch.nn.parallel.DistributedDataParallel(new_model, device_ids=[self.local_rank])
 
-        # todo try different strategies. Maybe lr for nerf should keep unchanged, and reset lr for poses
-        # # * if keep the lr for nerf, but reset lr for se3_refine, use this:
-        # current_nerf_lr = self.optimizer.param_groups[0]['lr']
-        # optimizer, lr_scheduler, optimizer_pose, scheduler_pose = new_model.get_optimizer_and_scheduler(current_nerf_lr, self.opt.lr_pose, self.opt.iters-self.global_step)
-        # * if reset the lr for both nerf and se3_refine, use this:
-        optimizer, lr_scheduler, optimizer_pose, scheduler_pose = new_model.get_optimizer_and_scheduler(self.opt.lr, self.opt.lr_pose, self.opt.iters-self.global_step)
+        # todo try different strategies.
+        # reset the lr for both nerf and se3_refine
+        optimizer, lr_scheduler, optimizer_pose, scheduler_pose, scheduler_update_every_step, scheduler_pose_update_every_step = __class__.get_optimizer_and_scheduler(self.opt.lr, self.opt.lr_pose, self.opt.iters-self.global_step, self.opt)
+        assert self.scheduler_update_every_step == scheduler_update_every_step
+        assert self.scheduler_pose_update_every_step == scheduler_pose_update_every_step
 
         self.model = new_model
         self.optimizer_lambdafunc = optimizer
@@ -185,7 +186,26 @@ class BARFTrainer_with_point_aug(BARFTrainer):
         if self.ema_decay is not None:
             self.ema = ExponentialMovingAverage(self.model.parameters(), decay=self.ema_decay)
         else:
-            self.ema = None        
+            self.ema = None
+
+    @classmethod
+    def get_optimizer_and_scheduler(cls, lr, lr_pose, total_iters, opt):
+        optimizer, scheduler = cls._get_optimizer_and_scheduler_for_nerf(lr, total_iters)
+        optimizer_pose, scheduler_pose = cls._get_optimizer_and_scheduler_for_pose(lr_pose, opt.aug_patience)
+        scheduler_update_every_step, scheduler_pose_update_every_step = True, False
+        return optimizer, scheduler, optimizer_pose, scheduler_pose, scheduler_update_every_step, scheduler_pose_update_every_step
+
+    @classmethod
+    def _get_optimizer_and_reduce_lr_on_plateau_scheduler_for_pose(cls, lr_pose, aug_patience, patience=10, min_lr_scale=0.1):
+        optimizer_pose = lambda model: torch.optim.Adam(model.se3_refine.parameters(), lr=lr_pose)
+
+        min_lr = lr_pose * min_lr_scale
+        assert math.ceil(aug_patience / patience) - 1 > 0, 'aug_patience should be at least two times larger than patience'
+        factor = math.pow(min_lr / lr_pose, 1 / (math.ceil(aug_patience / patience) - 1))
+        scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=factor, patience=patience, min_lr=min_lr)
+        return optimizer_pose, scheduler_pose
+    
+    _get_optimizer_and_scheduler_for_pose = _get_optimizer_and_reduce_lr_on_plateau_scheduler_for_pose
 
     def train_one_epoch(self, loader):
         average_loss = super().train_one_epoch(loader)

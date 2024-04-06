@@ -60,18 +60,6 @@ class BARFNetwork(torch.nn.Module):
         poses_hf_ref = pose.compose([poses_displacement, self.poses_hf])
         return poses_hf_ref
 
-    @staticmethod
-    def get_optimizer_and_scheduler(lr, lr_pose, iters):
-        optimizer = lambda model: torch.optim.Adam(model.nerf.get_params(lr), betas=(0.9, 0.99), eps=1e-15)
-        scheduler = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
-
-        # todo try various methods
-        optimizer_pose = lambda model: torch.optim.Adam(model.se3_refine.parameters(), lr=lr_pose)
-        scheduler_pose = lambda optimizer: torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / iters, 1))
-
-        return optimizer, scheduler, optimizer_pose, scheduler_pose
-
-
     def forward(self, data):
         poses_hf_ref = self.compute_refined_poses_hf()
         interpolator = PoseInterpolator(self.tss_poses_hf_ns, poses_hf_ref)

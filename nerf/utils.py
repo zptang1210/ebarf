@@ -381,6 +381,11 @@ class Trainer(object):
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.fp16)
 
         # variable init
+        # todo the training resumption process is buggy since it will repeat the last finished epoch.
+        # todo this tentatively could be fixed by set self.epoch = 0 meaning the number of epochs finished.
+        # todo In the train function, "for epoch in range(self.epoch, max_epochs + 1):" change self.epoch to self.epoch+1, meaning starting from a new epoch instead of the finished one.
+        # todo swap the two if statements inside the for loop of the train function. This means if it's time to evaluate, we evaluate before backing up the checkpoint.
+        # todo If we interrupt during evaluation, next time we resume the training, it will do evaluation again.
         self.epoch = 1
         self.global_step = 0
         self.local_step = 0
@@ -758,6 +763,9 @@ class Trainer(object):
 
         # get a ref to error_map
         self.error_map = train_loader._data.error_map
+
+        # * get a ref to evs_timespan_us
+        self.evs_timespan_us = train_loader._data.evs_timespan_us
         
         dt_eps = 0
         dt_logeps = 0
