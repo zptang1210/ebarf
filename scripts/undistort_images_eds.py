@@ -6,7 +6,17 @@ import tqdm
 import json
 import shutil
 import h5py
+import hdf5plugin
 import glob
+
+import sys
+# Get the current script's directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory by going one level up
+parent_dir = os.path.dirname(current_dir)
+# Add the parent directory to sys.path
+sys.path.append(parent_dir)
+
 from utils.event_utils import *
 from utils.plot_utils import render_ev_accumulation
 from utils.event_utils import compute_ms_to_idx
@@ -30,14 +40,14 @@ def main():
     imgdirout = os.path.join(args.indir, f"images_undistorted_{calibstr}")
     os.makedirs(imgdirout, exist_ok=True)
 
-    img_list = sorted(os.listdir(os.path.join(args.indir, imgdir)))
-    img_list = [os.path.join(args.indir, imgdir, im) for im in img_list if im.endswith(".png")]
+    img_list = sorted(os.listdir(imgdir))
+    img_list = [os.path.join(imgdir, im) for im in img_list if im.endswith(".png")]
     H, W, _ = cv2.imread(img_list[0]).shape
     assert W == 640
     assert H == 480
 
     # 1) Getting offset which is substracted from evs, mocap and images.
-    ef_in = h5py.File(os.path.join(args.indir, evinfile), "r+")
+    ef_in = h5py.File(evinfile, "r+")
     tss_evs_us = ef_in["t"][:]
     gt_us = np.loadtxt(os.path.join(args.indir, "stamped_groundtruth.txt"))
     tss_gt_us = gt_us[:, 0] * 1e6
