@@ -1,6 +1,7 @@
 import os
 import cv2
 import glob
+import hashlib
 import json
 import tqdm
 import pickle
@@ -27,6 +28,8 @@ import matplotlib
 matplotlib.use('Agg')
 
 from .NGPDataset import NGPDataset
+
+_cache_folder = os.path.join('output', 'event_data_cache')
 
 #####################
 # Loading esim 
@@ -102,18 +105,26 @@ def load_event_data_esim(datadir, idxs, hwf=None, img_folder="images"):
 #####################
 # Loading tumvie
 #####################
-def _load_event_data_tumvie_from_cache(path, idxs, hotpixs=False, H=720, W=1280, img_folder="left_images"):
-    cache_folder = os.path.join('output', 'event_data_cache')
+def _get_cache_file_name_for_tumvie(path, idxs, hotpixs, H, W, img_folder, prefix='cache_load_event_data'):
     valid_path_name = pathvalidate.sanitize_filename(path, replacement_text='-')
     idxs_str = '-'.join(map(str, idxs))
+    idxs_hash = hashlib.md5(idxs_str.encode('ascii')).hexdigest()
     img_folder_name = pathvalidate.sanitize_filename(img_folder, replacement_text='-')
-    cache_file = f'cache_load_event_data_tumvie_{valid_path_name}_{idxs_str}_{hotpixs}_{H}_{W}_{img_folder_name}.pickle'
-    cache_path = os.path.join(cache_folder, cache_file)
-    os.makedirs(cache_folder, exist_ok=True)
+    cache_file_name = prefix + '_' + f'tumvie_{valid_path_name}_{idxs_hash}_{hotpixs}_{H}_{W}_{img_folder_name}.pickle'
+    return cache_file_name 
+
+def _load_event_data_tumvie_from_cache(path, idxs, hotpixs=False, H=720, W=1280, img_folder="left_images"):
+    cache_file_name = _get_cache_file_name_for_tumvie(path, idxs, hotpixs, H, W, img_folder)
+    cache_path = os.path.join(_cache_folder, cache_file_name)
+    os.makedirs(_cache_folder, exist_ok=True)
     if os.path.exists(cache_path):
-        print(f'found cached event data {cache_file}, trying to load the cache...')
+        print(f'found cached event data {cache_file_name}, trying to load the cache...')
         with open(cache_path, 'rb') as fin:
             cache = pickle.load(fin)
+
+        idxs_cache = cache['idxs']
+        assert np.all(idxs_cache == idxs), 'The loaded cache file does not match due to idxs are different.'
+
         evs_out = cache['evs_out']
         hists = cache['hists']
         coords = cache['coords']
@@ -128,7 +139,8 @@ def _load_event_data_tumvie_from_cache(path, idxs, hotpixs=False, H=720, W=1280,
                      'coords': coords,
                      'rectify_map': rectify_map,
                      'tss_evs_centers_us': tss_evs_centers_us,
-                     'evs_timespan_us': evs_timespan_us}
+                     'evs_timespan_us': evs_timespan_us,
+                     'idxs': idxs}
             pickle.dump(cache, fout)
 
     return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
@@ -239,7 +251,46 @@ load_event_data_tumvie = _load_event_data_tumvie_from_cache
 #####################
 # Loading eds
 #####################
-def load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
+def _get_cache_file_name_for_EDS(path, idxs, calibstr, hotpixs, H, W, prefix='cache_load_event_data'):
+    valid_path_name = pathvalidate.sanitize_filename(path, replacement_text='-')
+    idxs_str = '-'.join(map(str, idxs))
+    idxs_hash = hashlib.md5(idxs_str.encode('ascii')).hexdigest()
+    cache_file_name = prefix + '_' + f'eds_{valid_path_name}_{idxs_hash}_{calibstr}_{hotpixs}_{H}_{W}.pickle'
+    return cache_file_name
+
+def _load_event_data_EDS_from_cache(path, idxs, calibstr, hotpixs=False, H=480, W=640):
+    cache_file_name= _get_cache_file_name_for_EDS(path, idxs, calibstr, hotpixs, H, W)
+    cache_path = os.path.join(_cache_folder, cache_file_name)
+    os.makedirs(_cache_folder, exist_ok=True)
+    if os.path.exists(cache_path):
+        print(f'found cached event data {cache_file_name}, trying to load the cache...')
+        with open(cache_path, 'rb') as fin:
+            cache = pickle.load(fin)
+
+        idxs_cache = cache['idxs']
+        assert np.all(idxs_cache == idxs), 'The loaded cache file does not match due to idxs are different.'
+
+        evs_out = cache['evs_out']
+        hists = cache['hists']
+        coords = cache['coords']
+        rectify_map = cache['rectify_map']
+        tss_evs_centers_us = cache['tss_evs_centers_us']
+        evs_timespan_us = cache['evs_timespan_us']
+    else:
+        evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us = _load_event_data_EDS(path, idxs, calibstr, hotpixs=hotpixs, H=H, W=W)
+        with open(cache_path, 'wb') as fout:
+            cache = {'evs_out': evs_out,
+                     'hists': hists,
+                     'coords': coords,
+                     'rectify_map': rectify_map,
+                     'tss_evs_centers_us': tss_evs_centers_us,
+                     'evs_timespan_us': evs_timespan_us,
+                     'idxs': idxs}
+            pickle.dump(cache, fout)
+        
+    return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
+
+def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
     idxss = sorted(idxs)
     
     # loading evs
@@ -270,9 +321,12 @@ def load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
 
     coords, evs_out, durs_ms, evs_hists, evs_hists_undist = [], [], [], [], []
     pos, neg = 0, 0
+    evs_timespan_us = np.zeros((tss_imgs_us.shape[0], 2))
     for i, ts_us in enumerate(tss_imgs_us):
         start_time_us = tss_evs_centers_us[i]
         end_time_us = tss_evs_centers_us[i+1]
+        evs_timespan_us[i, 0], evs_timespan_us[i, 1] = start_time_us, end_time_us
+
         durs_ms.append(end_time_us/1e3-start_time_us/1e3)
         ev_batch = event_slicer.get_events(start_time_us, end_time_us)
         if ev_batch is None:
@@ -317,8 +371,9 @@ def load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
     posneg = pos/neg
     print(f"Got total events of {np.asarray(durs_ms).sum()} milisecs, with pos/neg = {posneg}")
     
-    return evs_out, hists, coords, rectify_map, tss_evs_centers_us
+    return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
+load_event_data_EDS = _load_event_data_EDS_from_cache
 
 class EventNeRFDataset(NGPDataset):
     def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, cached_data=None):
@@ -536,15 +591,15 @@ class EventNeRFDataset(NGPDataset):
         
         rectify_map = np.stack(np.meshgrid(np.arange(self.W_ev), np.arange(self.H_ev)), axis=2)
         evs_timespan_us = None
-        if mode == "esim":
+        if mode == "esim": # todo add evs_timespan_us for ESIM.
             evs_batches_ns = load_event_data_esim(path, idxs, hwf=hwf, img_folder=img_folder)
             tss_centers_us = [1e-3*(evs[0, 2]) for evs in evs_batches_ns]
             tss_centers_us.append(evs_batches_ns[-1][-1, 2]*1e-3)
             coords = [cs[:, :2] for cs in evs_batches_ns]
         elif mode == "tumvie":
             evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_tumvie(path, idxs, self.hotpixs, self.H_ev, self.W_ev, img_folder=self.imgdir)
-        elif mode == "eds": # todo add evs_timespan_us for EDS and ESIM.
-            evs_batches_ns, hists, coords, rectify_map, tss_centers_us = load_event_data_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev)
+        elif mode == "eds": 
+            evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev)
         else: 
             sys.exit()
         self.rectify_map = rectify_map
