@@ -9,6 +9,7 @@ import shutil
 from scipy.spatial.transform import Slerp, Rotation
 
 import h5py
+import hdf5plugin
 import torch
 from torch.utils.data import DataLoader, Dataset
 import yaml
@@ -216,7 +217,7 @@ def load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
 
     # loadings undistortion
     h5file = glob.glob(os.path.join(path, f'rectify_map_{calibstr}.h5'))[0]
-    rmap = h5py.File(os.path.join(path, h5file), "r")
+    rmap = h5py.File(h5file, "r")
     rectify_map = np.array(rmap["rectify_map"])  # (H, W, 2)
     rmap.close()
 
@@ -225,7 +226,7 @@ def load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
     assert dT_ms_trigger_period > 3 and dT_ms_trigger_period < 50
     assert tss_imgs_us[0] - (evs["t"][0]) < 1e6 and tss_imgs_us[0] - (evs["t"][0]) > 0
     assert tss_imgs_us[-1] - (evs["t"][-1]) < 1e6 and tss_imgs_us[-1] - (evs["t"][-1]) > 0
-    tss_imgs_us = tss_imgs_us[[idxss]]
+    tss_imgs_us = tss_imgs_us[idxss] # * corrected this bug by removing extra []
     tss_evs_centers_us = np.insert(tss_imgs_us, 0, tss_imgs_us[0]-2*dT_ms_trigger_period*1e3)
     tss_evs_centers_us = np.insert(tss_evs_centers_us, len(tss_evs_centers_us), tss_evs_centers_us[-1]+2*dT_ms_trigger_period*1e3)
     tss_evs_centers_us = tss_evs_centers_us[:-1] + np.diff(tss_evs_centers_us)/2.
