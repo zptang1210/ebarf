@@ -28,7 +28,7 @@ matplotlib.use('Agg')
 from .EventNeRFDataset import *
 
 class EventNeRFDataset_with_poses_hf_override(EventNeRFDataset):
-    def __init__(self, opt, poses_hf_dict_for_override, device, type='train', downscale=1, n_test=10, select_frames=None, cached_data=None):
+    def __init__(self, opt, poses_hf_dict_for_override, device, type='train', downscale=1, n_test=10, select_frames=None, use_cache=True):
         """
         Input
         events_in: (N, 5)
@@ -87,6 +87,8 @@ class EventNeRFDataset_with_poses_hf_override(EventNeRFDataset):
         # * then we load self.xy_numEvs_idx, self.num_evs, self.idx_no_successor, self.num_successor_evs (!={} when self.accumulate_evs is True),
         # * self.events, self.poses_evs (!={} when precompute_evs_poses is True).
         # * notice that self.no_evs (!={} when self.negative_event_sampling is True) is not cached since it's computed after the for loop.
+        cached_data = self.get_event_nerf_dataset_cache_file_name() if use_cache else None
+        
         if cached_data is None or not os.path.exists(cached_data):
             print('* Compute init data of EventNeRFDataset...')
             evs_batches_ns_tmp_backup = list(evs_batches_ns_tmp) # * evs_batches_ns_tmp will shrink in each for iteration, back it up for caching.
@@ -182,7 +184,7 @@ class EventNeRFDataset_with_poses_hf_override(EventNeRFDataset):
                 
         else:
             # * load the cache
-            print('* Load the cached init data for EventNeRFDataset...')
+            print(f'* Load the cached init data from {cached_data} for EventNeRFDataset...')
             with open(cached_data, 'rb') as fin:
                 cache = pickle.load(fin)
 

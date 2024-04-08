@@ -376,7 +376,7 @@ def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
 load_event_data_EDS = _load_event_data_EDS_from_cache
 
 class EventNeRFDataset(NGPDataset):
-    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, cached_data=None):
+    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, use_cache=True):
         """
         Input
         events_in: (N, 5)
@@ -423,6 +423,8 @@ class EventNeRFDataset(NGPDataset):
         # * then we load self.xy_numEvs_idx, self.num_evs, self.idx_no_successor, self.num_successor_evs (!={} when self.accumulate_evs is True),
         # * self.events, self.poses_evs (!={} when precompute_evs_poses is True).
         # * notice that self.no_evs (!={} when self.negative_event_sampling is True) is not cached since it's computed after the for loop.
+        cached_data = self.get_event_nerf_dataset_cache_file_name() if use_cache else None
+
         if cached_data is None or not os.path.exists(cached_data):
             print('* Compute init data of EventNeRFDataset...')
             evs_batches_ns_tmp_backup = list(evs_batches_ns_tmp) # * evs_batches_ns_tmp will shrink in each for iteration, back it up for caching.
@@ -518,7 +520,7 @@ class EventNeRFDataset(NGPDataset):
                 
         else:
             # * load the cache
-            print('* Load the cached init data for EventNeRFDataset...')
+            print(f'* Load the cached init data from {cached_data} for EventNeRFDataset...')
             with open(cached_data, 'rb') as fin:
                 cache = pickle.load(fin)
 
@@ -583,6 +585,20 @@ class EventNeRFDataset(NGPDataset):
                 poses_batch = torch.from_numpy(np.asarray(poses)).to(device)
                 self.poses_evs[key] = poses_batch
 
+    def get_event_nerf_dataset_cache_file_name(self):
+        path = self.opt.datadir
+        idxs = self.frame_idxs
+        prefix = 'evnerfdataset'
+        if self.mode == "tumvie":
+            fname = _get_cache_file_name_for_tumvie(path, idxs, self.hotpixs, self.H_ev, self.W_ev, img_folder=self.imgdir, prefix=prefix)
+        elif self.mode == "eds": 
+            fname = _get_cache_file_name_for_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev, prefix=prefix)
+        else:
+            fname = None
+
+        filepath = os.path.join(_cache_folder, fname)
+        return filepath
+    
     def load_events_at_frame_idxs(self, path, idxs, mode, hwf=None):
         if self.images_corrupted and self.type == 'train':
             img_folder = "images_corrupted"

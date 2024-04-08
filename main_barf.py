@@ -189,8 +189,7 @@ if __name__ == '__main__':
     criterion = torch.nn.MSELoss(reduction='none')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    cached_data = os.path.join(get_universal_workspace_path(opt), 'EventNeRFDatasetCached.pickle')
-    train_dataset = EventBARFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, cached_data=cached_data)
+    train_dataset = EventBARFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, use_cache=True)
     train_loader = train_dataset.dataloader()
 
     valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()

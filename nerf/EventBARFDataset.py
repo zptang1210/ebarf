@@ -6,8 +6,8 @@ from .utils import get_rays
 from .EventNeRFDataset import EventNeRFDataset
 
 class EventBARFDataset(EventNeRFDataset):
-    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, cached_data=None):
-        super().__init__(opt, device, type=type, downscale=downscale, n_test=n_test, select_frames=select_frames, cached_data=cached_data)
+    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, use_cache=True):
+        super().__init__(opt, device, type=type, downscale=downscale, n_test=n_test, select_frames=select_frames, use_cache=use_cache)
         assert opt.event_only, 'only support event_only mode.'
 
         # * get the actual poses_hf that will be used in EBARF training
