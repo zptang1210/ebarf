@@ -470,9 +470,9 @@ class EventNeRFDataset(NGPDataset):
             # * check if the saved cache data matches the current session
             print('* Check if the saved cache data matches the current session...')
             evs_batches_ns_tmp_pkl = cache['evs_batches_ns_tmp']
-            if len(evs_batches_ns_tmp_pkl) == len(evs_batches_ns_tmp):
-                are_equal = all(np.array_equal(a, b) for a, b in zip(evs_batches_ns_tmp_pkl, evs_batches_ns_tmp))
-                assert are_equal, 'The cached file does not match the current session due to unmatched evs_batches_ns.'
+            assert len(evs_batches_ns_tmp_pkl) == len(evs_batches_ns_tmp)
+            are_equal = all(np.array_equal(a, b) for a, b in zip(evs_batches_ns_tmp_pkl, evs_batches_ns_tmp))
+            assert are_equal, 'The cached file does not match the current session due to unmatched evs_batches_ns.'
 
             if cache['no_events'] is not None:
                 # todo
