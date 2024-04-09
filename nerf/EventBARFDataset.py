@@ -6,7 +6,7 @@ from .utils import get_rays
 from .EventNeRFDataset import EventNeRFDataset
 
 class EventBARFDataset(EventNeRFDataset):
-    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, use_cache=True):
+    def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, trim_poses_hf=False, use_cache=True):
         super().__init__(opt, device, type=type, downscale=downscale, n_test=n_test, select_frames=select_frames, use_cache=use_cache)
         assert opt.event_only, 'only support event_only mode.'
 
@@ -22,9 +22,14 @@ class EventBARFDataset(EventNeRFDataset):
             if opt.noise > 0:
                 print(f'* randomly generate noised poses_hf based on {opt.noise}...')
                 noised_poses_hf_dict = self._compute_noised_poses_hf(opt.noise)
-                self.poses_hf_dict_final = noised_poses_hf_dict
+                poses_hf_dict_final_untrimmed = noised_poses_hf_dict
             else:
-                self.poses_hf_dict_final = self.get_gt_poses_hf_dict()
+                poses_hf_dict_final_untrimmed = self.get_gt_poses_hf_dict()
+
+            if trim_poses_hf:
+                self.poses_hf_dict_final = self.trim_poses_hf(poses_hf_dict_final_untrimmed)
+            else:
+                self.poses_hf_dict_final = poses_hf_dict_final_untrimmed
 
         if opt.poses_hf_save_path is not None:
             print(f'* save the final poses_hf for ebarf training to {opt.poses_hf_save_path}...')
@@ -119,6 +124,26 @@ class EventBARFDataset(EventNeRFDataset):
                                 'comment': f'add noise of {noise_dev} to the raw poses_hf.'}
 
         return noised_poses_hf_dict
+
+    def trim_poses_hf(self, poses_hf_dict_untrimmed, num_idx_expansion=5):
+        assert self.evs_timespan_us is not None
+        min_ts_ns = np.min(self.evs_timespan_us) * 1e3
+        max_ts_ns = np.max(self.evs_timespan_us) * 1e3
+        tss_poses_hf_ns = poses_hf_dict_untrimmed['tss_poses_hf_ns']
+        poses_hf = poses_hf_dict_untrimmed['poses_hf']
+        left_idx = np.searchsorted(tss_poses_hf_ns, min_ts_ns, side='left')
+        right_idx = np.searchsorted(tss_poses_hf_ns, max_ts_ns, side='right')
+        left_idx = max(left_idx - num_idx_expansion, 0)
+        right_idx = min(right_idx + num_idx_expansion, len(tss_poses_hf_ns))
+
+        trimmed_tss_poses_hf_ns = tss_poses_hf_ns[left_idx: right_idx]
+        trimmed_poses_hf = poses_hf[left_idx: right_idx, :, :]
+        new_comment = poses_hf_dict_untrimmed['comment'] + f' (trimmed by timespan ({min_ts_ns}, {max_ts_ns}) ns)'
+        poses_hf_dict = {'tss_poses_hf_ns': trimmed_tss_poses_hf_ns, 'poses_hf': trimmed_poses_hf,
+                         'raw_tss_poses_hf_ns': poses_hf_dict_untrimmed['raw_tss_poses_hf_ns'],
+                         'raw_poses_hf': poses_hf_dict_untrimmed['raw_poses_hf'],
+                         'comment': new_comment}
+        return poses_hf_dict
 
     @staticmethod
     def decompose_raw_poses_hf(raw_poses_hf):

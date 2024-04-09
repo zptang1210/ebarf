@@ -173,6 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--poses_hf_save_path', type=str, default=None, help="save to the given path the poses_hf used for training")
     parser.add_argument('--override_poses_hf', action='store_true', help="override the poses_hf that will be used in EBARF from poses_hf_load_path")
     parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when override_poses_hf is True, load the poses_hf from the given path")
+    parser.add_argument('--trim_poses_hf', action='store_true', help="trim poses_hf so that only the poses within the timespan of all events are included")
     
     ### point augmentation
     parser.add_argument('--aug', action='store_true', help='do point augmentation.')
@@ -189,7 +190,7 @@ if __name__ == '__main__':
     criterion = torch.nn.MSELoss(reduction='none')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    train_dataset = EventBARFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, use_cache=True)
+    train_dataset = EventBARFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, trim_poses_hf=opt.trim_poses_hf, use_cache=True)
     train_loader = train_dataset.dataloader()
 
     valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()
