@@ -89,7 +89,7 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                  scheduler_pose_update_every_step=False # whether to call scheduler_pose.step() after every train step 
                  ):
         self.max_pt_aug_times = max_pt_aug_times
-        self.check_loss_on_plateau = CheckLossOnPlateau(max_pt_aug_times)        
+        self.check_loss_on_plateau = CheckLossOnPlateau(max_pt_aug_times, patience=opt.aug_patience)        
         super().__init__(name,
                          opt,
                          model,
@@ -355,7 +355,7 @@ class BARFTrainer_with_point_aug(BARFTrainer):
         if self.optimizer_pose and  'optimizer_pose' in checkpoint_dict:
             try:
                 self.optimizer_pose.load_state_dict(checkpoint_dict['optimizer_pose'])
-                self.log("[INFO] loaded optimizer_pose. (lr_pose={self.optimizer_pose.param_groups[0]['lr']})")
+                self.log(f"[INFO] loaded optimizer_pose. (lr_pose={self.optimizer_pose.param_groups[0]['lr']})")
             except Exception as error:
                 self.log("[WARN] Failed to load optimizer_pose.", error)
         
