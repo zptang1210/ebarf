@@ -9,5 +9,5 @@ module load cuda/11.4.0
 module load cudnn/cuda11-8.4.1.50
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ebarf
-python main_nerf.py --config ./configs/eds11/eds11_enerf.txt --precompute_evs_poses 0
+python main_barf.py --config ./configs/eds11/eds11_ebarf_aug_patience_100.txt
 

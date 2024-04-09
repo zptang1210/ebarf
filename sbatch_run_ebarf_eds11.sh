@@ -3,7 +3,7 @@
 #SBATCH --mem=32768  # Requested Memory
 #SBATCH -p gypsum-2080ti  # Partition
 #SBATCH -G 1  # Number of GPUs
-#SBATCH -t 24:00:00  # Job time limit
+#SBATCH -t 168:00:00  # Job time limit
 #SBATCH -o slurm-enerf-eds-%j.out  # %j = job ID
 module load cuda/11.4.0
 module load cudnn/cuda11-8.4.1.50
