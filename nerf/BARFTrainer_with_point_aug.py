@@ -86,10 +86,12 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                  use_checkpoint="latest", # which ckpt to use at init time
                  use_tensorboardX=True, # whether to use tensorboard for logging
                  scheduler_update_every_step=True, # whether to call scheduler.step() after every train step 
-                 scheduler_pose_update_every_step=False # whether to call scheduler_pose.step() after every train step 
+                 scheduler_pose_update_every_step=False, # whether to call scheduler_pose.step() after every train step
+                 early_stop_monitor=True # weather to monitor the condition for early stopping
                  ):
         self.max_pt_aug_times = max_pt_aug_times
-        self.check_loss_on_plateau = CheckLossOnPlateau(max_pt_aug_times, patience=opt.aug_patience)        
+        self.max_num_times_loss_stuck = self.max_pt_aug_times + (1 if early_stop_monitor else 0)
+        self.check_loss_on_plateau = CheckLossOnPlateau(self.max_num_times_loss_stuck, patience=opt.aug_patience)        
         super().__init__(name,
                          opt,
                          model,
@@ -136,7 +138,7 @@ class BARFTrainer_with_point_aug(BARFTrainer):
         for epoch in range(self.epoch, max_epochs + 1):
             self.epoch = epoch
 
-            do_aug = self.train_one_epoch(train_loader)
+            loss_on_plateau = self.train_one_epoch(train_loader)
 
             if self.workspace is not None and self.local_rank == 0:
                 self.save_checkpoint(full=True, best=False)
@@ -145,21 +147,24 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                 self.evaluate_one_epoch(valid_loader)
                 self.save_checkpoint(full=False, best=True)
             
-            if do_aug:
+            if loss_on_plateau:
                 num_stuck_times = self.check_loss_on_plateau.get_stuck_times_on_plateau()
 
-                # record the model and do evaluation before augmentation
-                print(f'[AUG_INFO] Evaluate before augmentation {num_stuck_times}...')
-                name = f'last_epoch_{self.epoch:08d}_before_aug_{num_stuck_times}'
-                self.save_checkpoint(full=True, best=False, remove_old=False, name=name)
-                self.evaluate_one_epoch(valid_loader, name=name)
+                if num_stuck_times <= self.max_pt_aug_times:
+                    # record the model and do evaluation before augmentation
+                    print(f'[AUG_INFO] Evaluate before augmentation {num_stuck_times}...')
+                    name = f'last_epoch_{self.epoch:08d}_before_aug_{num_stuck_times}'
+                    self.save_checkpoint(full=True, best=False, remove_old=False, name=name)
+                    self.evaluate_one_epoch(valid_loader, name=name)
 
-                # point augmentation
-                aug_model = BARFNetwork_with_point_aug(self.model)
-                self.reset_model(aug_model)
-                print(f'[AUG_INFO] Point Augmentation (#aug = {num_stuck_times}| #poses_hf after aug = {aug_model.tss_poses_hf_ns.shape[0]})')
-                if num_stuck_times >= self.max_pt_aug_times: print(f'[AUG_INFO] Reached the max_pt_aug_times ({self.max_pt_aug_times})')
-                self.check_loss_on_plateau = CheckLossOnPlateau(self.max_pt_aug_times, stuck_times=num_stuck_times, patience=self.opt.aug_patience)
+                    # point augmentation
+                    aug_model = BARFNetwork_with_point_aug(self.model)
+                    self.reset_model(aug_model)
+                    print(f'[AUG_INFO] Point Augmentation (#aug = {num_stuck_times}| #poses_hf after aug = {aug_model.tss_poses_hf_ns.shape[0]})')
+                    if num_stuck_times >= self.max_pt_aug_times: print(f'[AUG_INFO] Reached the max_pt_aug_times ({self.max_pt_aug_times})')
+                    self.check_loss_on_plateau = CheckLossOnPlateau(self.max_num_times_loss_stuck, stuck_times=num_stuck_times, patience=self.opt.aug_patience)
+                else:
+                    print('[AUG_INFO] Loss has been on a plateau for a long time after finishing max number of times of point augmentaions. You may consider early stop.')
 
         if self.use_tensorboardX and self.local_rank == 0:
             self.writer.close()
