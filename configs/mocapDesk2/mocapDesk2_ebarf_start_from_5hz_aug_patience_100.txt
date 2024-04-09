@@ -1,6 +1,6 @@
 outdir = output/mocapDesk2_output/tumvie/
 datadir = data/TUMVIEDATA/mocap-desk2/
-expweek = apr-4-downsampled-poses-hf-5hz-with-aug-thres-100-lrpose-reduceonplateau
+expweek = apr-4-downsampled-poses-hf-5hz-with-aug-patience-100
 mode = tumvie
 iters = 1000000
 lr = 0.005
