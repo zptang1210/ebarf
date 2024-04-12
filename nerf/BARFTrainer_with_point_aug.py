@@ -91,7 +91,7 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                  ):
         self.max_pt_aug_times = max_pt_aug_times
         self.max_num_times_loss_stuck = self.max_pt_aug_times + (1 if early_stop_monitor else 0)
-        self.check_loss_on_plateau = CheckLossOnPlateau(self.max_num_times_loss_stuck, patience=opt.aug_patience)        
+        self.check_loss_on_plateau = CheckLossOnPlateau(self.max_num_times_loss_stuck, patience=opt.aug_patience, threshold=opt.aug_threshold)        
         super().__init__(name,
                          opt,
                          model,
@@ -162,7 +162,7 @@ class BARFTrainer_with_point_aug(BARFTrainer):
                     self.reset_model(aug_model)
                     print(f'[AUG_INFO] Point Augmentation (#aug = {num_stuck_times}| #poses_hf after aug = {aug_model.tss_poses_hf_ns.shape[0]})')
                     if num_stuck_times >= self.max_pt_aug_times: print(f'[AUG_INFO] Reached the max_pt_aug_times ({self.max_pt_aug_times})')
-                    self.check_loss_on_plateau = CheckLossOnPlateau(self.max_num_times_loss_stuck, stuck_times=num_stuck_times, patience=self.opt.aug_patience)
+                    self.check_loss_on_plateau = CheckLossOnPlateau(self.max_num_times_loss_stuck, stuck_times=num_stuck_times, patience=self.opt.aug_patience, threshold=self.opt.aug_threshold)
                 else:
                     print('[AUG_INFO] Loss has been on a plateau for a long time after finishing max number of times of point augmentaions. You may consider early stop.')
 

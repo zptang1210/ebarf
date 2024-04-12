@@ -179,6 +179,7 @@ if __name__ == '__main__':
     parser.add_argument('--aug', action='store_true', help='do point augmentation.')
     parser.add_argument('--max_pt_aug_times', type=int, default=0, help="effective only when aug=True. max number of times to do point augmentation")
     parser.add_argument('--aug_patience', type=int, default=500, help="effective only when aug=True. the degree of patience when the loss gets stuck on a plateau before we process point augmentation")
+    parser.add_argument('--aug_threshold', type=float, default=1e-4, help="the theshold for determining if the loss goes down for point augmentaion.")
 
     opt = parser.parse_args()
     assert_config(opt)
