@@ -185,6 +185,7 @@ if __name__ == '__main__':
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
     parser.add_argument('--override_poses_hf', action='store_true', help="override the poses_hf that will be used in EBARF from poses_hf_load_path")
     parser.add_argument('--poses_hf_load_path', type=str, default=None, help="effetive only when noise>0, load the noised poses_hf from the given path instead of getting a new randomized one.")
+    parser.add_argument('--disable_cache', action='store_true', help="disable the usage of cache")
 
     opt = parser.parse_args()
     assert_config(opt)
@@ -235,7 +236,7 @@ if __name__ == '__main__':
                     poses_hf_dict_for_override = pickle.load(fin)
                 print('* loaded poses_hf for override: #poses_hf =', poses_hf_dict_for_override['tss_poses_hf_ns'].shape[0])
                 print('* comment stored in the loaded poses_hf:', poses_hf_dict_for_override['comment'])
-                train_loader = EventNeRFDataset_with_poses_hf_override(opt, poses_hf_dict_for_override, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, use_cache=True).dataloader()
+                train_loader = EventNeRFDataset_with_poses_hf_override(opt, poses_hf_dict_for_override, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, use_cache=(not opt.disable_cache)).dataloader()
                 valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames).dataloader()
             else:
                 train_loader = NeRFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames).dataloader()

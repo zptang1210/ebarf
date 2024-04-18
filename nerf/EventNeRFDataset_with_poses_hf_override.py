@@ -43,7 +43,7 @@ class EventNeRFDataset_with_poses_hf_override(EventNeRFDataset):
         self.accumulate_evs = opt.accumulate_evs
         self.batch_size_evs = opt.batch_size_evs
         self.out_dim_color = opt.out_dim_color
-        evs_batches_ns_tmp, no_events = self.load_events_at_frame_idxs(opt.datadir, self.frame_idxs, mode=opt.mode)
+        evs_batches_ns_tmp, no_events = self.load_events_at_frame_idxs(opt.datadir, self.frame_idxs, mode=opt.mode, use_cache=use_cache)
         assert len(self.frame_idxs) == len(evs_batches_ns_tmp)
 
         # * comment this out since self.poses_hf will be overridden

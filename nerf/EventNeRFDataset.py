@@ -246,8 +246,6 @@ def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder
     
     return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
-load_event_data_tumvie = _load_event_data_tumvie_from_cache
-
 #####################
 # Loading eds
 #####################
@@ -373,7 +371,6 @@ def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
     
     return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
-load_event_data_EDS = _load_event_data_EDS_from_cache
 
 class EventNeRFDataset(NGPDataset):
     def __init__(self, opt, device, type='train', downscale=1, n_test=10, select_frames=None, use_cache=True):
@@ -391,7 +388,7 @@ class EventNeRFDataset(NGPDataset):
         self.accumulate_evs = opt.accumulate_evs
         self.batch_size_evs = opt.batch_size_evs
         self.out_dim_color = opt.out_dim_color
-        evs_batches_ns_tmp, no_events = self.load_events_at_frame_idxs(opt.datadir, self.frame_idxs, mode=opt.mode)
+        evs_batches_ns_tmp, no_events = self.load_events_at_frame_idxs(opt.datadir, self.frame_idxs, mode=opt.mode, use_cache=use_cache)
         assert len(self.frame_idxs) == len(evs_batches_ns_tmp)
 
         ####################
@@ -599,7 +596,7 @@ class EventNeRFDataset(NGPDataset):
         filepath = os.path.join(_cache_folder, fname)
         return filepath
     
-    def load_events_at_frame_idxs(self, path, idxs, mode, hwf=None):
+    def load_events_at_frame_idxs(self, path, idxs, mode, hwf=None, use_cache=True):
         if self.images_corrupted and self.type == 'train':
             img_folder = "images_corrupted"
         else:
@@ -608,13 +605,16 @@ class EventNeRFDataset(NGPDataset):
         rectify_map = np.stack(np.meshgrid(np.arange(self.W_ev), np.arange(self.H_ev)), axis=2)
         evs_timespan_us = None
         if mode == "esim": # todo add evs_timespan_us for ESIM.
+            assert not use_cache, 'esim mode does not support use cache yet.' # todo
             evs_batches_ns = load_event_data_esim(path, idxs, hwf=hwf, img_folder=img_folder)
             tss_centers_us = [1e-3*(evs[0, 2]) for evs in evs_batches_ns]
             tss_centers_us.append(evs_batches_ns[-1][-1, 2]*1e-3)
             coords = [cs[:, :2] for cs in evs_batches_ns]
         elif mode == "tumvie":
+            load_event_data_tumvie = _load_event_data_tumvie_from_cache if use_cache else _load_event_data_tumvie
             evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_tumvie(path, idxs, self.hotpixs, self.H_ev, self.W_ev, img_folder=self.imgdir)
-        elif mode == "eds": 
+        elif mode == "eds":
+            load_event_data_EDS = _load_event_data_EDS_from_cache if use_cache else _load_event_data_EDS
             evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev)
         else: 
             sys.exit()
