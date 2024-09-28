@@ -84,6 +84,7 @@ class BARFTrainer(Trainer):
 
         # * get a ref to evs_timespan_us
         self.evs_timespan_us = train_loader._data.evs_timespan_us
+        self.poses_hf_dict_final = train_loader._data.poses_hf_dict_final
 
         for epoch in range(self.epoch, max_epochs + 1):
             self.epoch = epoch
@@ -468,14 +469,20 @@ class BARFTrainer(Trainer):
         os.makedirs(save_poses_hf_ref_path, exist_ok=True)
         with torch.no_grad():
             poses_hf_ref = self.model.compute_refined_poses_hf().detach().cpu()
-        evs_timespan_us = self.evs_timespan_us if hasattr(self, 'evs_timespan_us') else None
+        evs_timespan_us = torch.tensor(self.evs_timespan_us) if hasattr(self, 'evs_timespan_us') else None
         poses_hf_dict = {'poses_hf': self.model.poses_hf.detach().cpu(),
                          'poses_hf_ref': poses_hf_ref,
                          'tss_poses_hf_ns': self.model.tss_poses_hf_ns.detach().cpu(),
                          'raw_poses_hf': self.model.raw_poses_hf.detach().cpu(),
                          'raw_tss_poses_hf_ns': self.model.raw_tss_poses_hf_ns.detach().cpu(),
                          'evs_timespan_us': evs_timespan_us,
+                        #  'poses_hf_dict': self.poses_hf_dict_final,
                          'epoch': self.epoch}
+        # # todo new interface, enable later (check if the two implementations have the same value before change)
+        # poses_hf_dict = {'poses_hf_ref': poses_hf_ref,
+        #                  'evs_timespan_us': evs_timespan_us,
+        #                  'poses_hf_dict': self.poses_hf_dict_final,
+        #                  'epoch': self.epoch}
         prefix = '' if name is None else name+'_'
         with open(os.path.join(save_poses_hf_ref_path, f'{prefix}poses_hf_ref_{self.epoch:08d}.pickle'), 'wb') as fout:
             pickle.dump(poses_hf_dict, fout)

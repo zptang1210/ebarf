@@ -58,7 +58,7 @@ class NeRFDataset(NGPDataset):
             results['index'] = index
             results['inds_coarse'] = rays['inds_coarse']
 
-        if (self.mode == "tumvie" or self.mode == "eds") and self.type == "val" and self.get_rays_evs_on_collate: 
+        if (self.mode == "tumvie" or self.mode == "eds" or self.mode == 'evo') and self.type == "val" and self.get_rays_evs_on_collate: 
             poses_evCam = self.poses_evCam_atValIdxs[index, ...].to(self.device)
             rays = get_rays(poses_evCam, self.intrinsics_evs, self.H_ev, self.W_ev, self.num_rays, error_map)
             results['rays_evs_o'] = rays['rays_o']

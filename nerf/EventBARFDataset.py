@@ -17,7 +17,7 @@ class EventBARFDataset(EventNeRFDataset):
             with open(opt.poses_hf_load_path, 'rb') as fin:
                 poses_hf_dict_for_override = pickle.load(fin)
             print('* comment stored in the loaded poses_hf:', poses_hf_dict_for_override['comment'])
-            self.poses_hf_dict_final = poses_hf_dict_for_override
+            poses_hf_dict_final_untrimmed = poses_hf_dict_for_override
         else:
             if opt.noise > 0:
                 print(f'* randomly generate noised poses_hf based on {opt.noise}...')
@@ -26,10 +26,11 @@ class EventBARFDataset(EventNeRFDataset):
             else:
                 poses_hf_dict_final_untrimmed = self.get_gt_poses_hf_dict()
 
-            if trim_poses_hf:
-                self.poses_hf_dict_final = self.trim_poses_hf(poses_hf_dict_final_untrimmed)
-            else:
-                self.poses_hf_dict_final = poses_hf_dict_final_untrimmed
+        if trim_poses_hf:
+            self.poses_hf_dict_final = self.trim_poses_hf(poses_hf_dict_final_untrimmed)
+            print('trim poses_hf to only contain the poses that are involved for event pose interpolation.')
+        else:
+            self.poses_hf_dict_final = poses_hf_dict_final_untrimmed
 
         if opt.poses_hf_save_path is not None:
             print(f'* save the final poses_hf for ebarf training to {opt.poses_hf_save_path}...')
@@ -131,17 +132,19 @@ class EventBARFDataset(EventNeRFDataset):
         max_ts_ns = np.max(self.evs_timespan_us) * 1e3
         tss_poses_hf_ns = poses_hf_dict_untrimmed['tss_poses_hf_ns']
         poses_hf = poses_hf_dict_untrimmed['poses_hf']
-        left_idx = np.searchsorted(tss_poses_hf_ns, min_ts_ns, side='left')
-        right_idx = np.searchsorted(tss_poses_hf_ns, max_ts_ns, side='right')
-        left_idx = max(left_idx - num_idx_expansion, 0)
-        right_idx = min(right_idx + num_idx_expansion, len(tss_poses_hf_ns))
+        left_idx_ = np.searchsorted(tss_poses_hf_ns, min_ts_ns, side='left')
+        right_idx_ = np.searchsorted(tss_poses_hf_ns, max_ts_ns, side='right')
+        left_idx = max(left_idx_ - num_idx_expansion, 0)
+        right_idx = min(right_idx_ + num_idx_expansion, len(tss_poses_hf_ns))
 
         trimmed_tss_poses_hf_ns = tss_poses_hf_ns[left_idx: right_idx]
         trimmed_poses_hf = poses_hf[left_idx: right_idx, :, :]
         new_comment = poses_hf_dict_untrimmed['comment'] + f' (trimmed by timespan ({min_ts_ns}, {max_ts_ns}) ns)'
+        trim_params = {'idx': (left_idx_, right_idx_), 'idx_with_exp': (left_idx, right_idx), 'exp': num_idx_expansion}
         poses_hf_dict = {'tss_poses_hf_ns': trimmed_tss_poses_hf_ns, 'poses_hf': trimmed_poses_hf,
                          'raw_tss_poses_hf_ns': poses_hf_dict_untrimmed['raw_tss_poses_hf_ns'],
                          'raw_poses_hf': poses_hf_dict_untrimmed['raw_poses_hf'],
+                         'trim_params': trim_params,
                          'comment': new_comment}
         return poses_hf_dict
 

@@ -8,6 +8,8 @@ from nerf.BARFTrainer import BARFTrainer
 from nerf.BARFTrainer_with_point_aug import BARFTrainer_with_point_aug
 from nerf.network_barf import BARFNetwork
 
+from nerf.NeRFDataset_with_poses_hf_override import NeRFDataset_with_poses_hf_override
+
 # [debug] enable for debugging (slow!)
 # torch.autograd.set_detect_anomaly(True)
 
@@ -66,14 +68,14 @@ def get_barf_model(opt, poses_hf_dict, intrinsics_evs, verbose=True):
 def assert_config(opt):
     assert opt.acc_max_num_evs >= 0
 
-    if opt.mode == "eds":
+    if opt.mode == "eds" or opt.mode == 'evo':
         assert opt.pp_poses_sphere == 0
 
     assert (opt.lr > 1e-7) and (opt.lr < 1e2)
     if opt.event_only:
         assert opt.events == True
 
-    if opt.mode != "tumvie" and opt.mode != "eds":
+    if opt.mode != "tumvie" and opt.mode != "eds" and opt.mode != 'evo':
         assert opt.eval_stereo_views == 0
 
     if opt.out_dim_color == 1:
@@ -145,7 +147,7 @@ if __name__ == '__main__':
 
     ### dataset options
     # (the default value is for the fox dataset)
-    parser.add_argument('--mode', type=str, default='eds', help="dataset mode, supports (tumvie, eds, esim)")
+    parser.add_argument('--mode', type=str, default='eds', help="dataset mode, supports (tumvie, eds, esim, evo)")
     parser.add_argument('--color_space', type=str, default='srgb', help="Color space, supports (linear, srgb)")
     parser.add_argument('--preload', action='store_true', help="preload all data into GPU, accelerate training but use more GPU memory")
     # (default is for the fox dataset)
@@ -195,7 +197,7 @@ if __name__ == '__main__':
     train_dataset = EventBARFDataset(opt, device=device, type='train', downscale=opt.downscale, select_frames=select_frames, trim_poses_hf=opt.trim_poses_hf, use_cache=(not opt.disable_cache))
     train_loader = train_dataset.dataloader()
 
-    valid_loader = NeRFDataset(opt, device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()
+    valid_loader = NeRFDataset_with_poses_hf_override(opt, poses_hf_dict_for_override=train_dataset.get_final_poses_hf_dict(), device=device, type='val', downscale=opt.downscale, select_frames=select_frames, get_rays_evs_on_collate=False).dataloader()
 
     model = get_barf_model(opt, train_dataset.get_final_poses_hf_dict(), train_dataset.intrinsics_evs)
 

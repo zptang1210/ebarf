@@ -177,7 +177,7 @@ class NGPDataset(Dataset):
         self.type = type # train, val, test
         self.downscale = downscale
         self.root_path = opt.datadir
-        self.mode = opt.mode # esim, tumvie, eds
+        self.mode = opt.mode # esim, tumvie, eds, evo
         self.preload = opt.preload # preload data into GPU
         self.scale = opt.scale # camera radius scale to make sure camera are inside the bounding box.
         self.bound = opt.bound # bounding box half length, also used as the radius to random sample poses.
@@ -312,6 +312,25 @@ class NGPDataset(Dataset):
                 self.create_transform_json_from_posesBds()
             with open(self.transform_filepath, 'r') as f:
                 transform = json.load(f)
+        elif self.mode == 'evo':
+            self.camId = 0
+            self.camIdEvs = 1
+            self.calibstr = "calib0"
+            self.imgdir = f"images_undistorted_{self.calibstr}/"
+
+            if self.e2vid:
+                raise NotImplementedError('e2vid not supported yet.')
+
+            self.T_ev_rgb = quat_dict_to_pose_hom({"px": 0.0, "py": 0.0, "pz": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0})
+
+            with open(os.path.join(self.root_path, f"calib_undist_{self.calibstr}.json"), 'r') as f:
+                self.calibdata = json.load(f)
+            
+            self.convert_EVO_to_posesBds_and_hfPoses()
+            if not os.path.exists(self.transform_filepath):
+                self.create_transform_json_from_posesBds()
+            with open(self.transform_filepath, 'r') as f:
+                transform = json.load(f)
         else:
             raise NotImplementedError(f'unknown dataset mode: {self.mode}')
 
@@ -329,7 +348,7 @@ class NGPDataset(Dataset):
             # we will read image to get H, W.
             self.H = self.W = None
         
-        if (opt.mode == "tumvie" or opt.mode == "eds"):
+        if (opt.mode == "tumvie" or opt.mode == "eds" or opt.mode == "evo"):
             self.W_ev = transform['w_evs']
             self.H_ev = transform['h_evs']
             assert self.W_ev == 1280 if self.mode == "tumvie" else self.W_ev == self.W
@@ -414,14 +433,14 @@ class NGPDataset(Dataset):
         cy = (transform['cy'] / downscale) if 'cy' in transform else (self.W / 2)
 
         self.intrinsics = np.array([fl_x, fl_y, cx, cy])
-        if opt.events or opt.mode == "tumvie" or opt.mode == "eds":
+        if opt.events or opt.mode == "tumvie" or opt.mode == "eds" or opt.mode == "evo":
             self.intrinsics_evs = np.array([transform['fl_x_evs'], transform['fl_y_evs'], transform['cx_evs'], transform['cy_evs']])
             assert self.intrinsics_evs[2] > 100 and self.intrinsics_evs[2] < 2000
             assert self.intrinsics_evs[3] > 100 and self.intrinsics_evs[3] < 2000
         if self.preload:
             self.intrinsics = torch.from_numpy(self.intrinsics).to(self.device)
 
-        if (self.mode == "tumvie" or self.mode == "eds") and self.type == "val": # Event Camera poses
+        if (self.mode == "tumvie" or self.mode == "eds" or self.mode == "evo") and self.type == "val": # Event Camera poses
             tss_poses_hf_ns = np.asarray([p["ts_ns"] for p in self.poses_hf]) # self.poses_hf is in Event-View
             rots_hf = [p["pose_c2w"][:3, :3] for p in self.poses_hf]
             trans_hf = [p["pose_c2w"][:3, 3] for p in self.poses_hf]
@@ -432,10 +451,10 @@ class NGPDataset(Dataset):
             np.savetxt(os.path.join(self.workspace, f"{self.type}_final_evCam_quatlist_atValTss_ns.txt"), quatlist_hf_ns, header="stamps in nanoseconds, px, py, pz, qx, qy, qz, qw")
 
         # Sanity checks
-        assert self.H > 200 and self.H < 4000
-        assert self.W > 200 and self.W < 4000
-        assert cx > 100 and cx < 2000
-        assert cy > 100 and cy < 2000
+        assert self.H > 100 and self.H < 4000
+        assert self.W > 100 and self.W < 4000
+        assert cx > 50 and cx < 2000
+        assert cy > 50 and cy < 2000
 
     def update_poses(self, x=0, y=0, z=0):
         self.poses[:, 0, 3] += x
@@ -502,6 +521,11 @@ class NGPDataset(Dataset):
             poses_dict.append({"pose_c2w": poses_hom[i, :, :], "ts_ns": tss_all_poses_ns[i]})
         self.poses_hf = poses_dict
 
+    def convert_EVO_to_posesBds_and_hfPoses(self):
+        assert (not self.pp_poses_sphere)
+        assert (not self.e2vid)
+        self.convert_EDS_to_posesBds_and_hfPoses()
+
     def convert_EDS_to_posesBds_and_hfPoses(self):
         poses_gt_us = np.loadtxt(os.path.join(self.root_path, "stamped_groundtruth_us.txt"), skiprows=1)
         tss_gt_us = poses_gt_us[:, 0]
@@ -519,7 +543,7 @@ class NGPDataset(Dataset):
         H, W = img0.shape[0], img0.shape[1]
 
         T_imu_marker = quat_dict_to_pose_hom({"px": 0.0, "py": 0.0, "pz": 0.0, "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0})
-        T_ev_rgb = T_imu_marker.copy() if self.e2vid else np.copy(self.T_ev_rgb) 
+        T_ev_rgb = T_imu_marker.copy() if self.e2vid else np.copy(self.T_ev_rgb)
 
         # Preprocessing: 
         if self.pp_poses_sphere:
@@ -593,7 +617,7 @@ class NGPDataset(Dataset):
 
         all_trafos_c2w = np.asarray([T_mocap_marker @ np.linalg.inv(T_imu_marker) @ T_imu_evCam for T_mocap_marker in all_trafos]).squeeze()[:, :3, :]
         if not self.pp_poses_sphere:
-            all_trafos_c2w = rub_from_rdf(all_trafos_c2w[:, :3, :])
+            all_trafos_c2w = rub_from_rdf(all_trafos_c2w[:, :3, :]) # * final coord is RDF
         check_rot_batch(all_trafos_c2w)
 
         poses_dict = []
@@ -610,6 +634,9 @@ class NGPDataset(Dataset):
             poses_c2w, bds = read_poses_bounds(os.path.join(self.workspace, F"poses_bounds.npy"), invert=False)
             poses_c2w = poses_c2w if self.pp_poses_sphere else rub_from_rdf(poses_c2w)
         elif self.mode == "eds":
+            poses_c2w, bds = read_poses_bounds(os.path.join(self.workspace, F"poses_bounds.npy"), invert=False)
+            poses_c2w = poses_c2w if self.pp_poses_sphere else rub_from_rdf(poses_c2w)
+        elif self.mode == "evo":
             poses_c2w, bds = read_poses_bounds(os.path.join(self.workspace, F"poses_bounds.npy"), invert=False)
             poses_c2w = poses_c2w if self.pp_poses_sphere else rub_from_rdf(poses_c2w)
         else:
@@ -633,7 +660,7 @@ class NGPDataset(Dataset):
         assert np.abs(len(imgs_path) - poses_c2w.shape[0]) == 0
 
         hwf = poses_c2w[0, :3, -1]
-        if self.mode == "tumvie" or self.mode == "eds":
+        if self.mode == "tumvie" or self.mode == "eds" or self.mode == "evo":
             intr = self.calibdata["intrinsics_undistorted"][self.camId]
             if self.mode == "tumvie" and self.e2vid:
                 intr = {"fx": 982.70606462, "fy": 982.55614817, "cx":  632.7907291, "cy": 250.45539802 } # only used once, but problem with this is the border => might be even fairer to undistort separately
@@ -708,6 +735,8 @@ class NGPDataset(Dataset):
                 gtdir = "left_images_undistorted/" if self.camId == 0 else "right_images_undistorted/"
             elif self.mode == "eds":
                 gtdir = f"images_undistorted_{self.calibstr}/"
+            elif self.mode == "evo":
+                gtdir = f"images_undistorted_{self.calibstr}/"
             elif self.mode == "esim":
                 gtdir = "images/"
 
@@ -758,6 +787,9 @@ class NGPDataset(Dataset):
                     tss_imgs_us = np.loadtxt(os.path.join(self.root_path, "images", "image_stamps_ns.txt")) / 1000
                     tss_e2vs_us = np.loadtxt(os.path.join(self.root_path, self.imgdir, "timestamps.txt"))
                 elif self.mode == "eds":
+                    tss_imgs_us = np.loadtxt(os.path.join(self.root_path, "images_timestamps_us.txt"))
+                    tss_e2vs_us = np.loadtxt(os.path.join(self.imgdir, "timestamps.txt"))
+                elif self.mode == "evo":
                     tss_imgs_us = np.loadtxt(os.path.join(self.root_path, "images_timestamps_us.txt"))
                     tss_e2vs_us = np.loadtxt(os.path.join(self.imgdir, "timestamps.txt"))
                 elif self.mode == "tumvie":

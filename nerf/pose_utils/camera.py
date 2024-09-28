@@ -136,7 +136,7 @@ class Lie():
             ans = ans+(-1)**i*x**(2*i)/denom
         return ans
 
-# class Quaternion():
+class Quaternion():
 
     def q_to_R(self,q):
         # https://en.wikipedia.org/wiki/Rotation_matrix#Quaternion

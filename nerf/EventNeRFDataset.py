@@ -185,18 +185,26 @@ def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder
     
     # for very long event durations (> max_dT_us), subsample events, since tumvie is high resolution
     ev_window_dT_us = (tss_evs_centers_us[-1] - tss_evs_centers_us[0])
-    max_dT_us = 10*1e6 
-    if ev_window_dT_us > max_dT_us:
-        no_evs_dT_us = ev_window_dT_us - max_dT_us
-        dT_us = no_evs_dT_us / (2 * len(idxss)) # assumes equal event window selection
-        print(f"Not using all events due to memory constraints! \
-            \nUsing dT_us={dT_us*1e-3:.3f}ms since requested ev-window is {ev_window_dT_us*1e-6:.3f}secs long \
-            but can use maximum of max_dT {max_dT_us*1e-6:.3f}secs.")
+    # * disable this to use all the events:
+    # max_dT_us = 10*1e6 
+    # if ev_window_dT_us > max_dT_us:
+    #     no_evs_dT_us = ev_window_dT_us - max_dT_us
+    #     dT_us = no_evs_dT_us / (2 * len(idxss)) # assumes equal event window selection
+    #     print(f"Not using all events due to memory constraints! \
+    #         \nUsing dT_us={dT_us*1e-3:.3f}ms since requested ev-window is {ev_window_dT_us*1e-6:.3f}secs long \
+    #         but can use maximum of max_dT {max_dT_us*1e-6:.3f}secs.")
+
+    # * intentionally let events overlap for each image
+    dT_us = -(dT_ms_trigger_period * 1e3 / 2)
 
     evs_timespan_us = np.zeros((tss_imgs_us.shape[0], 2))
     for i, ts_us in enumerate(tss_imgs_us):
-        start_time_us = tss_evs_centers_us[i] + dT_us
-        end_time_us = tss_evs_centers_us[i+1] - dT_us
+        if i == 0 or i == len(tss_imgs_us)-1: # * the first image and the last image do not enable overlapping
+            start_time_us = tss_evs_centers_us[i]
+            end_time_us = tss_evs_centers_us[i+1]
+        else:
+            start_time_us = tss_evs_centers_us[i] + dT_us
+            end_time_us = tss_evs_centers_us[i+1] - dT_us
         evs_timespan_us[i, 0], evs_timespan_us[i, 1] = start_time_us, end_time_us
 
         durs_ms.append(end_time_us/1e3-start_time_us/1e3)
@@ -247,6 +255,53 @@ def _load_event_data_tumvie(path, idxs, hotpixs=False, H=720, W=1280, img_folder
     return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
 #####################
+# Loading evo
+#####################
+def _get_cache_file_name_for_EVO(path, idxs, calibstr, hotpixs, H, W, prefix='cache_load_event_data'):
+    valid_path_name = pathvalidate.sanitize_filename(path, replacement_text='-')
+    idxs_str = '-'.join(map(str, idxs))
+    idxs_hash = hashlib.md5(idxs_str.encode('ascii')).hexdigest()
+    cache_file_name = prefix + '_' + f'evo_{valid_path_name}_{idxs_hash}_{calibstr}_{hotpixs}_{H}_{W}.pickle'
+    return cache_file_name
+
+def _load_event_data_EVO_from_cache(path, idxs, calibstr, hotpixs=False, H=180, W=240):
+    cache_file_name= _get_cache_file_name_for_EVO(path, idxs, calibstr, hotpixs, H, W)
+    cache_path = os.path.join(_cache_folder, cache_file_name)
+    os.makedirs(_cache_folder, exist_ok=True)
+    if os.path.exists(cache_path):
+        print(f'found cached event data {cache_file_name}, trying to load the cache...')
+        with open(cache_path, 'rb') as fin:
+            cache = pickle.load(fin)
+
+        idxs_cache = cache['idxs']
+        assert np.all(idxs_cache == idxs), 'The loaded cache file does not match due to idxs are different.'
+
+        evs_out = cache['evs_out']
+        hists = cache['hists']
+        coords = cache['coords']
+        rectify_map = cache['rectify_map']
+        tss_evs_centers_us = cache['tss_evs_centers_us']
+        evs_timespan_us = cache['evs_timespan_us']
+    else:
+        evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us = _load_event_data_EVO(path, idxs, calibstr, hotpixs=hotpixs, H=H, W=W)
+        with open(cache_path, 'wb') as fout:
+            cache = {'evs_out': evs_out,
+                     'hists': hists,
+                     'coords': coords,
+                     'rectify_map': rectify_map,
+                     'tss_evs_centers_us': tss_evs_centers_us,
+                     'evs_timespan_us': evs_timespan_us,
+                     'idxs': idxs}
+            pickle.dump(cache, fout)
+        
+    return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
+
+def _load_event_data_EVO(path, idxs, calibstr, hotpixs=False, H=180, W=240):
+    # * EVO dataset is preprocessed to the same format as EDS except some assertions in its loading function needs to be disabled
+    return _load_event_data_EDS(path=path, idxs=idxs, calibstr=calibstr, hotpixs=hotpixs, H=H, W=W, skip_assert=True)
+
+
+#####################
 # Loading eds
 #####################
 def _get_cache_file_name_for_EDS(path, idxs, calibstr, hotpixs, H, W, prefix='cache_load_event_data'):
@@ -288,7 +343,7 @@ def _load_event_data_EDS_from_cache(path, idxs, calibstr, hotpixs=False, H=480, 
         
     return evs_out, hists, coords, rectify_map, tss_evs_centers_us, evs_timespan_us
 
-def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
+def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640, skip_assert=False):
     idxss = sorted(idxs)
     
     # loading evs
@@ -308,21 +363,31 @@ def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
 
     tss_imgs_us = np.loadtxt(os.path.join(path, "images_timestamps_us.txt"))
     dT_ms_trigger_period = np.diff(tss_imgs_us).mean()/1e3
-    assert dT_ms_trigger_period > 3 and dT_ms_trigger_period < 50
-    assert tss_imgs_us[0] - (evs["t"][0]) < 1e6 and tss_imgs_us[0] - (evs["t"][0]) > 0
-    assert tss_imgs_us[-1] - (evs["t"][-1]) < 1e6 and tss_imgs_us[-1] - (evs["t"][-1]) > 0
+    if not skip_assert:
+        assert dT_ms_trigger_period > 3 and dT_ms_trigger_period < 50
+        assert tss_imgs_us[0] - (evs["t"][0]) < 1e6 and tss_imgs_us[0] - (evs["t"][0]) > 0
+        assert tss_imgs_us[-1] - (evs["t"][-1]) < 1e6 and tss_imgs_us[-1] - (evs["t"][-1]) > 0
     tss_imgs_us = tss_imgs_us[idxss] # * corrected this bug by removing extra []
     tss_evs_centers_us = np.insert(tss_imgs_us, 0, tss_imgs_us[0]-2*dT_ms_trigger_period*1e3)
     tss_evs_centers_us = np.insert(tss_evs_centers_us, len(tss_evs_centers_us), tss_evs_centers_us[-1]+2*dT_ms_trigger_period*1e3)
     tss_evs_centers_us = tss_evs_centers_us[:-1] + np.diff(tss_evs_centers_us)/2.
-    assert np.all(np.diff(tss_evs_centers_us)>0)
+    if not skip_assert: assert np.all(np.diff(tss_evs_centers_us)>0)
 
     coords, evs_out, durs_ms, evs_hists, evs_hists_undist = [], [], [], [], []
     pos, neg = 0, 0
     evs_timespan_us = np.zeros((tss_imgs_us.shape[0], 2))
+
+    # * intentionally let events overlap for each image
+    dT_us = -(dT_ms_trigger_period * 1e3 / 2)
+
     for i, ts_us in enumerate(tss_imgs_us):
-        start_time_us = tss_evs_centers_us[i]
-        end_time_us = tss_evs_centers_us[i+1]
+        if i == 0 or i == len(tss_imgs_us)-1: # * the first and the last images do not enable overlapping (ensure the overall timespan doesn't change)
+            start_time_us = tss_evs_centers_us[i]
+            end_time_us = tss_evs_centers_us[i+1]
+        else:
+            start_time_us = tss_evs_centers_us[i] + dT_us
+            end_time_us = tss_evs_centers_us[i+1] - dT_us
+
         evs_timespan_us[i, 0], evs_timespan_us[i, 1] = start_time_us, end_time_us
 
         durs_ms.append(end_time_us/1e3-start_time_us/1e3)
@@ -330,8 +395,10 @@ def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
         if ev_batch is None:
             print(f"Found no events in {(start_time_us)/1e6:.3f}secs to {(end_time_us)/1e6:.3f}secs ({durs_ms[i]:.3f} ms duration) at frame {idxss[i]}.jpg")
             continue
-        assert np.abs(ev_batch["t"][-1]-end_time_us) <= 50
-        assert np.abs(ev_batch["t"][0]-start_time_us) <= 900
+
+        if not skip_assert:
+            assert np.abs(ev_batch["t"][-1]-end_time_us) <= 50
+            assert np.abs(ev_batch["t"][0]-start_time_us) <= 900
             
         N = len(ev_batch["t"])
         tmp = np.zeros((N, 4))
@@ -345,12 +412,13 @@ def _load_event_data_EDS(path, idxs, calibstr, hotpixs=False, H=480, W=640):
         neg += np.sum(tmp[:, 3]<0)
         coord = np.zeros((N, 2))
         coord[:, 0] = ev_batch["x"] 
-        coord[:, 1] = ev_batch["y"] 
-        assert ev_batch["x"].min() >= 0.0
-        assert ev_batch["x"].max() <= W-1
-        assert ev_batch["y"].min() >= 0.0
-        assert ev_batch["y"].max() <= H-1
-        assert np.all(tmp[:, 2] >= 0.0)
+        coord[:, 1] = ev_batch["y"]
+        if not skip_assert:
+            assert ev_batch["x"].min() >= 0.0
+            assert ev_batch["x"].max() <= W-1
+            assert ev_batch["y"].min() >= 0.0
+            assert ev_batch["y"].max() <= H-1
+            assert np.all(tmp[:, 2] >= 0.0)
         print(f"median x-deviation of undistorting event camera: {np.median(np.abs(ev_batch['x']-rect[..., 0]))}")
         print(f"median y-deviation of undistorting event camera: {np.median(np.abs(ev_batch['y']-rect[..., 1]))}")
 
@@ -590,6 +658,8 @@ class EventNeRFDataset(NGPDataset):
             fname = _get_cache_file_name_for_tumvie(path, idxs, self.hotpixs, self.H_ev, self.W_ev, img_folder=self.imgdir, prefix=prefix)
         elif self.mode == "eds": 
             fname = _get_cache_file_name_for_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev, prefix=prefix)
+        elif self.mode == "evo": 
+            fname = _get_cache_file_name_for_EVO(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev, prefix=prefix)
         else:
             fname = None
 
@@ -616,6 +686,9 @@ class EventNeRFDataset(NGPDataset):
         elif mode == "eds":
             load_event_data_EDS = _load_event_data_EDS_from_cache if use_cache else _load_event_data_EDS
             evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_EDS(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev)
+        elif mode == "evo":
+            load_event_data_EVO = _load_event_data_EVO_from_cache if use_cache else _load_event_data_EVO
+            evs_batches_ns, hists, coords, rectify_map, tss_centers_us, evs_timespan_us = load_event_data_EVO(path, idxs, self.calibstr, self.hotpixs, H=self.H_ev, W=self.W_ev)
         else: 
             sys.exit()
         self.rectify_map = rectify_map
@@ -693,7 +766,7 @@ class EventNeRFDataset(NGPDataset):
                 no_evs_out[fidx]["tss_bds"]["N_ev_chunks"].append(N_ev_chunks)
                 no_evs_out[fidx]["tss_bds"]["dt_us"].append(dt_us)
 
-        if mode == "tumvie" or mode == "eds":
+        if mode == "tumvie" or mode == "eds" or mode == "evo":
             # [debug]: visualize distorted and undisorted events
             os.makedirs(os.path.join(self.workspace, "loaded_events_undist_viz"), exist_ok=True)
             N_hists = len(hists["hists"])

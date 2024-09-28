@@ -15,7 +15,7 @@ tensorf/
 **tensorf*
 
 TUMVIEDATA/
-deprecated/
+**/deprecated
 output/
 *.out
 
